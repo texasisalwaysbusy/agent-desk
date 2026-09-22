@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    :root{color-scheme:light dark;font:13px/1.4 Inter,system-ui,sans-serif}body{margin:0;padding:14px;background:transparent;color:var(--color-text-primary,#171717)}header{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}h1{margin:0;font-size:14px}.actions{display:flex;gap:6px}button{border:1px solid color-mix(in srgb,currentColor 18%,transparent);border-radius:7px;padding:6px 9px;background:color-mix(in srgb,currentColor 5%,transparent);color:inherit;cursor:pointer}.counts{display:flex;gap:6px;overflow:auto;margin-bottom:10px}.count{white-space:nowrap;border-radius:999px;padding:3px 7px;background:color-mix(in srgb,#2563eb 10%,transparent)}ul{display:grid;gap:7px;margin:0;padding:0;list-style:none}li{display:grid;grid-template-columns:auto 1fr auto;gap:8px;align-items:center;padding:8px;border:1px solid color-mix(in srgb,currentColor 12%,transparent);border-radius:8px}.id{font:11px ui-monospace,monospace;color:#2563eb}.title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.status{font-size:11px;opacity:.7}.empty{opacity:.65;padding:18px;text-align:center}
+  </style>
+</head>
+<body>
+  <header><h1>Agent Desk 活动</h1><div class="actions"><button id="refresh">刷新</button><button id="open">打开完整看板</button></div></header>
+  <div id="counts" class="counts"></div><ul id="tasks"></ul><div id="empty" class="empty" hidden>暂无活动</div>
+  <script type="module">
+    const labels={backlog:"待办池",todo:"待处理",in_progress:"进行中",in_review:"审核",blocked:"阻塞",done:"完成",canceled:"取消"};
+    let snapshot=window.openai?.toolOutput||{};
+    const call=async(name,args={})=>{const result=await window.openai.callTool(name,args);return result?.structuredContent||result};
+    function render(){const tasks=Array.isArray(snapshot.tasks)?snapshot.tasks:[];document.querySelector('#counts').innerHTML=Object.entries(snapshot.counts||{}).map(([key,value])=>`<span class="count">${labels[key]||key} ${value}</span>`).join('');document.querySelector('#tasks').innerHTML=tasks.map(task=>`<li><span class="id">${task.identifier}</span><span class="title"></span><span class="status">${labels[task.status]||task.status}</span></li>`).join('');document.querySelectorAll('.title').forEach((node,index)=>{node.textContent=tasks[index].title});document.querySelector('#empty').hidden=tasks.length>0}
+    document.querySelector('#refresh').onclick=async()=>{snapshot=await call('list_taskboard_activity',{limit:50});render()};
+    document.querySelector('#open').onclick=async()=>{await call('open_full_taskboard',{})};
+    render();
+  </script>
+</body>
+</html>

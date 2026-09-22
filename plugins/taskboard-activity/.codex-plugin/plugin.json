@@ -1,0 +1,27 @@
+{
+  "name": "taskboard-activity",
+  "version": "0.1.0",
+  "description": "Agent Desk local task tools",
+  "author": {
+    "name": "Agent Desk contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Agent Desk",
+    "shortDescription": "Manage tasks in the local Agent Desk workspace.",
+    "longDescription": "Local task tools for Agent Desk. Uses only the validated runtime descriptor and loopback service.",
+    "developerName": "Agent Desk contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "打开本地 Taskboard 活动面板。",
+      "列出当前项目中待处理的任务。"
+    ],
+    "brandColor": "#2563EB"
+  },
+  "mcpServers": "./.mcp.json"
+}

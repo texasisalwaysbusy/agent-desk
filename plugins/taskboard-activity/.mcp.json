@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "taskboard_activity": {
+      "command": "cmd.exe",
+      "args": ["/d", "/s", "/c", "call", "node", "./mcp/server.mjs"],
+      "cwd": ".",
+      "env_vars": ["LOCALAPPDATA", "CODEX_THREAD_ID"],
+      "startup_timeout_sec": 10,
+      "tool_timeout_sec": 60
+    }
+  }
+}

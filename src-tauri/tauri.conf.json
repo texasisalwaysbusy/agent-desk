@@ -1,0 +1,28 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Agent Desk",
+  "version": "1.2.0",
+  "identifier": "app.agentdesk.desktop",
+  "app": {
+    "windows": []
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "category": "Productivity",
+    "shortDescription": "Local workspace for agent tasks, collaboration and human review",
+    "createUpdaterArtifacts": false,
+    "externalBin": [
+      "binaries/node"
+    ],
+    "resources": {
+      "resources/": ""
+    },
+    "icon": [
+      "icons/agent-desk.png",
+      "icons/agent-desk.ico"
+    ]
+  }
+}
