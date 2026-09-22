@@ -17,8 +17,18 @@ Agent Desk 在官方 Codex 桌面应用内提供项目任务管理、执行进�
 - 任务与会话关联、项目自动化准备、侧栏额度显示。
 - 通过受验证的本地接收端集成交接审批；待验收不等于执行授权。
 
-当前发行目标为 Windows x64。此版本是待验收源码；构建通过不等于已安装验收。
-其他平台的遗留文件不代表支持承诺。尚未宣称存在公开下载或正式发布。
+## 下载安装
+
+**[下载 Agent Desk 1.2.0 · Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.0/Agent-Desk-1.2.0-Windows-x64-setup.exe)**
+
+[中英文发行说明与 SHA-256 校验文件](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.0)
+
+当前支持 Windows x64，按当前用户安装，安装包未数字签名。自动化检查、Windows
+构建与打包后的服务验证已通过；真实宿主安装、旧数据复用安装和人工审批执行仍待
+端到端验收。其他平台的遗留文件不代表支持承诺。
+
+安装前请正常退出 Codex 与旧版 Taskboard 托盘程序，保留旧版安装及数据作为回退点，
+不要同时运行两套启动器。
 
 ## 开发与验证
 

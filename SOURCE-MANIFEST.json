@@ -25,11 +25,11 @@
   },
   {
     "path": "README.md",
-    "sha256": "18f0b4c80bb383844635d5fd1c2c0e1026a4e62b9e234195f2197d6184649e3c"
+    "sha256": "603fd0eacfa8c4ed4d705352365f8186d12a51d30ef7f2673728298f3f93dc2c"
   },
   {
     "path": "README.zh-CN.md",
-    "sha256": "68771b4f458ef9819e40c9e48ca66e0bbde25839b5394fa6ef2b4030fef9361e"
+    "sha256": "c6020087064e828eedd81ee9a04e6b0cfabeb038a6e8bcaa9ec3d206ed6d25a8"
   },
   {
     "path": "cli/agentdesk.mjs",

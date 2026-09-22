@@ -26,9 +26,20 @@ Source-available; covered additions and modifications use Apache-2.0 + Commons C
 - Handoff approval review through an authenticated local receiver integration.
 - A compact allowance card in the native sidebar.
 
-Windows x64 is the supported distribution target. This checkout is release-candidate
-source; build success does not imply installed-host acceptance. No published download
-or verified cross-platform release is claimed.
+## Download / 下载
+
+**[Download Agent Desk 1.2.0 for Windows x64 / 下载 Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.0/Agent-Desk-1.2.0-Windows-x64-setup.exe)**
+
+[Release notes and SHA-256 / 中英文发行说明与校验文件](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.0)
+
+Windows x64 is the supported distribution target. The installer is unsigned and
+installs for the current user. Automated checks, Windows packaging and packaged-service
+verification passed; installed-host, legacy-store installation and live human-approval
+acceptance remain incomplete. Other platforms are not supported.
+
+安装前请正常退出 Codex 与旧版 Taskboard 托盘程序，保留旧版安装及数据作为回退点，
+不要同时运行两套启动器。安装包未签名；真实宿主安装、旧数据复用安装和人工审批执行
+仍待端到端验收。
 
 ## Development
 
