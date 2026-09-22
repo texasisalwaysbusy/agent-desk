@@ -1,0 +1,22 @@
+Agent Desk
+
+Agent Desk is an independently maintained derivative of Dashi Taskboard.
+Upstream: https://github.com/chuspeeism/dashi-taskboard
+Baseline: v1.1.6, a421066cfed492d31aaa8f0a2e423107a15d474c.
+
+The upstream Apache License 2.0 is preserved in licenses/Apache-2.0.txt.
+Agent Desk additions and modifications are subject to Apache-2.0 plus the
+Commons Clause v1.0 condition, only to the extent the Licensor has authority
+to license them. See LICENSE and docs/licensing.md; upstream rights remain unchanged. Original copyright
+and attribution notices remain applicable to their respective contributions.
+Agent Desk changes include Windows local hardening, agent handoff review,
+automation integration, capability checks, quota presentation, an action-focused
+dashboard, independent product identity and compatibility handling.
+
+Agent Desk is not an official OpenAI product and is not an official release
+of Dashi Taskboard. Product names used to identify supported third-party tools
+remain the property of their respective owners.
+
+Bundled font: Inter, SIL Open Font License, see web/public/Inter-LICENSE.txt.
+Bundled Gantt stylesheet: DHTMLX Gantt 10, MIT, see licenses/DHTMLX-Gantt.txt.
+Other dependencies retain the licenses included in their packages.
