@@ -26,6 +26,17 @@ Source-available; covered additions and modifications use Apache-2.0 + Commons C
 - Handoff approval review through an authenticated local receiver integration.
 - A compact allowance card in the native sidebar.
 
+## Preview / 效果示例
+
+![Agent Desk allowance panel in Chinese and English, using demo data](docs/assets/allowance-preview.jpg)
+
+The allowance card shows the remaining 5-hour and weekly usage percentages and reset
+countdowns. This preview renders the current component with synthetic data in an
+illustrative container; it is not a full Codex screenshot or installed-host acceptance.
+
+额度卡展示 5 小时与每周使用额度及重置倒计时。上图使用演示数据，不包含真实账户信息；
+它是当前组件的效果示例，不代表完整 Codex 界面或安装验收结果。
+
 ## Download / 下载
 
 **[Download Agent Desk 1.2.0 for Windows x64 / 下载 Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.0/Agent-Desk-1.2.0-Windows-x64-setup.exe)**

@@ -17,6 +17,14 @@ Agent Desk 在官方 Codex 桌面应用内提供项目任务管理、执行进�
 - 任务与会话关联、项目自动化准备、侧栏额度显示。
 - 通过受验证的本地接收端集成交接审批；待验收不等于执行授权。
 
+## 效果示例
+
+![Agent Desk 中英文额度面板，使用演示数据](docs/assets/allowance-preview.jpg)
+
+侧栏额度卡展示 **5 小时与每周的剩余使用比例、重置倒计时**，帮助判断何时继续安排任务。
+这里的“额度”指使用限额，不是现金余额。示例由当前组件代码与演示数据渲染，
+不包含真实账户信息；示例容器并非完整 Codex 界面，也不替代安装后的真实验收。
+
 ## 下载安装
 
 **[下载 Agent Desk 1.2.0 · Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.0/Agent-Desk-1.2.0-Windows-x64-setup.exe)**

@@ -25,11 +25,11 @@
   },
   {
     "path": "README.md",
-    "sha256": "603fd0eacfa8c4ed4d705352365f8186d12a51d30ef7f2673728298f3f93dc2c"
+    "sha256": "d3d32425c4c0eb83071fbaac46235730feca03cccb1da437b8f8d7181b9d2b09"
   },
   {
     "path": "README.zh-CN.md",
-    "sha256": "c6020087064e828eedd81ee9a04e6b0cfabeb038a6e8bcaa9ec3d206ed6d25a8"
+    "sha256": "a3733417024986a9f915e4d9ffbdd3b2834e24f5c567cd2621b406a2e9a3be26"
   },
   {
     "path": "cli/agentdesk.mjs",
@@ -42,6 +42,10 @@
   {
     "path": "docs/architecture.md",
     "sha256": "bab6dfca33fea7e24ae22ebb64d63b7c3a878cc4ac97233c9660fa33f61b3408"
+  },
+  {
+    "path": "docs/assets/allowance-preview.jpg",
+    "sha256": "298b685b22bb0995d474c205c710dfe741e9611f89d64d50211bec7d95e45ee0"
   },
   {
     "path": "docs/licensing.md",
@@ -133,7 +137,7 @@
   },
   {
     "path": "scripts/export-public-source.py",
-    "sha256": "b0ba9b613d041e63f3dc87dba688821128612b6ae63edc57157d853ce5628886"
+    "sha256": "80e04aace98c0bad25a0c563ed795b6b1c7277ff7e81892331cc71b9dc3c8beb"
   },
   {
     "path": "scripts/handoff-approval.mjs",
