@@ -3,10 +3,11 @@
 
   const GLOBAL_KEY = "__codexTaskboardQuotaDisplay__";
   const HOST_ID = "codex-taskboard-quota-display";
-  const VERSION = "1.0.3";
+  const VERSION = "1.0.6";
   const SIDEBAR_SELECTORS = [
     "aside.app-shell-left-panel",
     'aside[data-testid="app-shell-floating-left-panel"]',
+    'aside[data-app-shell-left-panel-appearance]',
   ];
   const SCROLLER_SELECTOR = "[data-app-action-sidebar-scroll]";
   const SETTINGS_SELECTOR = "[data-settings-panel-slug]";
@@ -148,7 +149,7 @@
   }
 
   function visible(element) {
-    if (!element?.isConnected) return false;
+    if (!element?.isConnected || element.closest('[inert], [aria-hidden="true"]')) return false;
     const style = getComputedStyle(element);
     if (style.display === "none" || style.visibility === "hidden") return false;
     const rect = element.getBoundingClientRect();
@@ -156,13 +157,17 @@
   }
 
   function activeSidebar() {
-    return SIDEBAR_SELECTORS.flatMap((selector) => Array.from(document.querySelectorAll(selector)))
-      .filter(visible)
-      .sort((left, right) => right.getBoundingClientRect().width - left.getBoundingClientRect().width)[0] || null;
+    const sidebars = [...new Set(SIDEBAR_SELECTORS.flatMap(
+      (selector) => Array.from(document.querySelectorAll(selector)),
+    ))].filter(visible);
+    return sidebars.length === 1 ? sidebars[0] : null;
   }
 
   function insertionPoint(sidebar) {
-    const scroller = sidebar?.querySelector(SCROLLER_SELECTOR);
+    const navigation = sidebar?.querySelector('nav[role="navigation"][aria-label]');
+    const modernScroll = navigation?.querySelector("div.overflow-y-auto");
+    const scroller = sidebar?.querySelector(SCROLLER_SELECTOR)
+      || (modernScroll?.querySelector("button.sidebar-item") ? modernScroll : null);
     return scroller?.parentElement && sidebar.contains(scroller.parentElement) ? scroller : null;
   }
 
@@ -238,30 +243,33 @@
     state.shadow.innerHTML = `<style>
       /* Outer document resets override normal :host rules. Keep the footer reservation
          inside the shadow cascade's protected layout, without styling native elements. */
-      :host { display:block !important; flex:0 0 auto !important; width:auto; min-width:0; margin:6px 8px 48px !important; color:var(--color-token-foreground, CanvasText); font-family:var(--font-family-sans, Inter, ui-sans-serif, system-ui, sans-serif); }
+      :host { display:block !important; flex:0 0 auto !important; width:auto; min-width:0; margin:6px 8px 48px !important; color:var(--color-text, var(--color-token-foreground, CanvasText)); font-family:var(--font-sans, var(--font-family-sans, ui-sans-serif, system-ui, sans-serif)); }
+      :host([data-codex-taskboard-quota-layout="content-panel"]) { margin:6px 12px 12px !important; }
       :host([hidden]) { display:none !important; }
-      .quota-card { padding:10px 11px 9px; border:1px solid color-mix(in srgb, currentColor 10%, transparent); border-radius:10px; background:color-mix(in srgb, var(--color-token-sidebar-background, Canvas) 94%, currentColor 6%); box-shadow:0 1px 2px rgba(0,0,0,.04); }
-      .quota-head,.quota-line { display:flex; align-items:center; justify-content:space-between; min-width:0; }
-      .quota-title { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; line-height:1.35; font-weight:650; letter-spacing:-.01em; }
-      .quota-status { display:inline-flex; align-items:center; gap:5px; flex:none; color:var(--color-token-description-foreground, color-mix(in srgb, currentColor 62%, transparent)); font-size:9.5px; font-weight:600; }
-      .quota-status::before { content:""; width:5px; height:5px; border-radius:50%; background:#2aa876; box-shadow:0 0 0 2px color-mix(in srgb, #2aa876 14%, transparent); }
-      .quota-card[data-state="stale"] .quota-status::before { background:#d49a17; box-shadow:0 0 0 2px color-mix(in srgb, #d49a17 14%, transparent); }
+      *,::before,::after { box-sizing:border-box; }
+      .quota-card { padding:4px 4px 2px; border:0; border-radius:0; background:transparent; }
+      .quota-head,.quota-line { display:flex; align-items:center; justify-content:space-between; min-width:0; gap:8px; }
+      .quota-head { flex-wrap:wrap; gap:6px 8px; }
+      .quota-title { flex:1 0 auto; max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:12px; line-height:16px; font-weight:600; }
+      .quota-status { display:inline-flex; align-items:center; gap:4px; flex:none; color:var(--color-text-secondary, var(--color-token-description-foreground, color-mix(in srgb, currentColor 62%, transparent))); font-size:10px; line-height:16px; font-weight:400; }
+      .quota-status:empty { display:none; }
+      .quota-status::before { content:""; width:4px; height:4px; border-radius:50%; background:var(--color-text-success, #2aa876); }
+      .quota-card[data-state="stale"] .quota-status::before { background:var(--color-text-warning, light-dark(#946b00, #d9b75f)); }
       .quota-card[data-state="loading"] .quota-status::before,
       .quota-card[data-state="unavailable"] .quota-status::before { background:#999; box-shadow:none; }
-      .quota-list { display:grid; gap:9px; margin-top:9px; }
-      .quota-row + .quota-row { padding-top:9px; border-top:1px solid color-mix(in srgb, currentColor 8%, transparent); }
-      .quota-line { color:var(--color-token-description-foreground, color-mix(in srgb, currentColor 66%, transparent)); font-size:10.5px; line-height:1.3; }
-      .quota-line strong { color:currentColor; font-size:12.5px; font-variant-numeric:tabular-nums; }
-      .quota-track { height:4px; margin-top:5px; overflow:hidden; border-radius:99px; background:color-mix(in srgb, currentColor 10%, transparent); }
-      .quota-track i { display:block; height:100%; border-radius:inherit; background:#2aa876; transition:width .25s ease; }
-      .quota-row[data-tone="warning"] .quota-line strong { color:#c38a0b; }
-      .quota-row[data-tone="warning"] .quota-track i { background:#d49a17; }
-      .quota-row[data-tone="critical"] .quota-line strong { color:var(--color-token-error-foreground, #c34a44); }
-      .quota-row[data-tone="critical"] .quota-track i { background:var(--color-token-error-foreground, #c34a44); }
-      .quota-reset,.quota-empty { margin-top:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:var(--color-token-description-foreground, color-mix(in srgb, currentColor 54%, transparent)); font-size:9.5px; line-height:1.35; font-variant-numeric:tabular-nums; }
-      .quota-empty { margin-top:8px; }
+      .quota-list { display:grid; gap:10px; margin-top:8px; }
+      .quota-line { color:var(--color-text-secondary, var(--color-token-description-foreground, color-mix(in srgb, currentColor 66%, transparent))); font-size:12px; line-height:18px; }
+      .quota-line strong { color:var(--color-text-success, light-dark(#278459, #66bd92)); font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; }
+      .quota-track { height:3px; margin-top:4px; overflow:hidden; border-radius:99px; background:color-mix(in srgb, currentColor 10%, transparent); }
+      .quota-track i { display:block; height:100%; border-radius:inherit; background:var(--color-text-success, light-dark(#278459, #66bd92)); transition:width .25s ease; }
+      .quota-row[data-tone="warning"] .quota-line strong { color:var(--color-text-warning, light-dark(#946b00, #d9b75f)); }
+      .quota-row[data-tone="warning"] .quota-track i { background:var(--color-text-warning, light-dark(#946b00, #d9b75f)); }
+      .quota-row[data-tone="critical"] .quota-line strong { color:var(--color-text-danger, var(--color-token-error-foreground, light-dark(#b42318, #f18b88))); }
+      .quota-row[data-tone="critical"] .quota-track i { background:var(--color-text-danger, var(--color-token-error-foreground, light-dark(#b42318, #f18b88))); }
+      .quota-reset,.quota-empty { margin-top:4px; white-space:normal; overflow-wrap:anywhere; color:var(--color-text-secondary, var(--color-token-description-foreground, color-mix(in srgb, currentColor 62%, transparent))); font-size:11px; line-height:16px; font-variant-numeric:tabular-nums; }
+      .quota-empty { margin-top:0; }
       @media (prefers-reduced-motion:reduce) { .quota-track i { transition:none; } }
-      @media (forced-colors:active) { .quota-card { background:Canvas; border-color:CanvasText; } .quota-track { border:1px solid CanvasText; background:Canvas; } .quota-track i { background:Highlight !important; } }
+      @media (forced-colors:active) { .quota-track { border:1px solid CanvasText; background:Canvas; } .quota-track i { background:Highlight !important; } }
     </style><section class="quota-card" data-state="${status}" aria-label="${copy.title}">
       <header class="quota-head"><span class="quota-title">${copy.title}</span><span class="quota-status">${statusText}</span></header>
       <div class="quota-list">${body}</div>
@@ -292,6 +300,15 @@
     if (!sidebar || !scroller) {
       if (!host.hidden) host.hidden = true;
       return;
+    }
+    // In the new content panel, the profile occupies a separate activity rail.
+    // Unknown/legacy layouts and embedded footers retain the old clearance.
+    const contentPanel = sidebar.matches("aside[data-app-shell-left-panel-appearance]")
+      && Boolean(scroller.closest('nav[role="navigation"][aria-label]'))
+      && !sidebar.querySelector("footer,[data-app-action-sidebar-footer]");
+    const layout = contentPanel ? "content-panel" : "legacy";
+    if (host.getAttribute("data-codex-taskboard-quota-layout") !== layout) {
+      host.setAttribute("data-codex-taskboard-quota-layout", layout);
     }
     if (host.previousElementSibling !== scroller || host.parentElement !== scroller.parentElement) {
       scroller.insertAdjacentElement("afterend", host);
@@ -364,7 +381,8 @@
 
   const existing = window[GLOBAL_KEY];
   if (existing?.version === VERSION) {
-    existing.heartbeat();
+    if (existing.status().cleaned) existing.mount();
+    else existing.heartbeat();
     return existing.status();
   }
   existing?.cleanup?.();

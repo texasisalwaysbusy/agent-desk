@@ -28,31 +28,42 @@ Source-available; covered additions and modifications use Apache-2.0 + Commons C
 
 ## Preview / 效果示例
 
-![Agent Desk allowance panel in Chinese and English, using demo data](docs/assets/allowance-preview.jpg)
+![Agent Desk borderless sidebar allowance display in Chinese and English, using demo data](docs/assets/allowance-preview.png)
 
 The allowance card shows the remaining 5-hour and weekly usage percentages and reset
-countdowns. This preview renders the current component with synthetic data in an
-illustrative container; it is not a full Codex screenshot or installed-host acceptance.
+countdowns. This preview renders the actual borderless component (1.0.6) with
+synthetic data in illustrative sidebars, retaining threshold colors. It is not
+a full Codex screenshot or a substitute for installed-host acceptance.
 
 额度卡展示 5 小时与每周使用额度及重置倒计时。上图使用演示数据，不包含真实账户信息；
-它是当前组件的效果示例，不代表完整 Codex 界面或安装验收结果。
+它使用实际的 1.0.6 无边框组件渲染，不代表完整 Codex 界面或安装验收结果。
 
 ## Download / 下载
 
-**[Download Agent Desk 1.2.0 for Windows x64 / 下载 Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.0/Agent-Desk-1.2.0-Windows-x64-setup.exe)**
+**[Download Agent Desk 1.2.2 for Windows x64 / 下载 Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.2/Agent-Desk-1.2.2-Windows-x64-setup.exe)**
 
-[Release notes and SHA-256 / 中英文发行说明与校验文件](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.0)
+[Release notes and SHA-256 / 中英文发行说明与校验文件](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.2)
 
 Windows x64 is the supported distribution target. The installer is unsigned and
-installs for the current user. Automated checks, Windows packaging and packaged-service
-verification passed; installed-host, legacy-store installation and live human-approval
-acceptance remain incomplete. Other platforms are not supported.
+installs for the current user. The equivalent rc.6 build passed installed startup,
+sidebar/quota presence, normal exit and manual restart on Codex 26.924.2738.0;
+1.2.2 promotes that implementation with stable version metadata and a Release build.
+The second session's Codex exit code and tray version label were not observed;
+installed executable/resource hashes matched. Live receiver-approval execution
+is not certified by this acceptance. Other platforms are not supported.
 
 安装前请正常退出 Codex 与旧版 Taskboard 托盘程序，保留旧版安装及数据作为回退点，
-不要同时运行两套启动器。安装包未签名；真实宿主安装、旧数据复用安装和人工审批执行
-仍待端到端验收。
+不要同时运行两套启动器。安装包未签名；本次已验证 rc.6 的安装、启动、侧栏、首次
+正常退出和手动重开。第二轮 Codex 退出码与托盘版本文字未确认，安装文件哈希已核对；
+此次验收不代表人工审批执行流程已认证。
 
 ## Development
+
+For a Codex startup failure, [live startup diagnostics](docs/startup-diagnostics.md)
+can be followed from a separate terminal without opening the workbench.
+
+Codex 启动失败时，可在另一个终端使用[实时启动诊断](docs/startup-diagnostics.md)，
+无需等待工作台窗口出现。
 
 Use Node.js 24 and npm. For Windows packaging, install Rust stable 1.88 or newer,
 the MSVC C++ workload and Windows SDK.
@@ -75,9 +86,20 @@ without an automatic move. Ambiguous stores cause an explicit error. The indepen
 installer does not silently replace the old application. Follow the [compatibility
 notes](docs/product-identity.md) before local acceptance or migration.
 
-The launcher uses the installed, signed Codex executable and existing login profile.
-It opens no debugging TCP port and reads no authentication database. The backend
-binds to loopback only. See [PRIVACY.md](PRIVACY.md).
+The Windows launcher uses registered Store activation and the
+existing login profile. It validates the package and executable signatures on
+every manual start, then checks the renderer structure before injection. Minor
+version numbers do not require an allowlist update; an unknown structure fails
+closed. Future versions are not guaranteed compatible.
+
+This route opens a random `127.0.0.1` debugging port owned by the activated Codex
+process. Other same-machine processes can reach it; CDP is not authenticated by
+Agent Desk's API credentials. The launcher reads no authentication database and
+never attaches to an ordinary running Codex. Exit Codex normally before starting
+Agent Desk. See [PRIVACY.md](PRIVACY.md). The stable installer is compiled in Release
+mode. It retains sanitized diagnostic/error logs; standalone developer experiments
+are not the default launch path. A locally retained rc.6 installation need not be
+replaced by the public stable build.
 
 ## Source and license
 

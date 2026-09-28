@@ -15,6 +15,7 @@ import {
 
 const allCapabilities = { fullPanel: true, quotaDisplay: true, taskNavigation: true };
 const injectorSource = await readFile(new URL("../scripts/codex-injector.mjs", import.meta.url), "utf8");
+const injectionSource = await readFile(new URL("../inject/codex-taskboard.user.js", import.meta.url), "utf8");
 
 function fixture(url = "app://codex/index.html") {
   const dom = new JSDOM(`<!doctype html><html><body>
@@ -33,6 +34,46 @@ function fixture(url = "app://codex/index.html") {
   return dom;
 }
 
+function updatedFixture(url = "app://codex/index.html") {
+  const dom = new JSDOM(`<!doctype html><html><body>
+    <aside data-app-shell-left-panel-appearance="content-surface">
+      <nav role="navigation" aria-label="App navigation">
+        <div class="min-h-0 flex-1 overflow-y-auto">
+          <div><button class="sidebar-item">New task</button><button class="sidebar-item">Projects</button></div>
+        </div>
+      </nav>
+    </aside>
+    <main data-app-shell-main-surface="default">
+      <div><div data-app-shell-main-content-layout="full-bleed">
+        <div class="_MainContentFrame_example"><div data-app-shell-focus-area="main"></div></div>
+        <div class="right-panel"></div>
+      </div></div>
+    </main>
+  </body></html>`, { url, runScripts: "outside-only" });
+  dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({
+    x: 0, y: 0, top: 0, left: 0, width: 400, height: 600, right: 400, bottom: 600,
+  });
+  dom.window.electronBridge = { sendMessageFromView() {} };
+  return dom;
+}
+
+function fixedHeaderFixture() {
+  const dom = updatedFixture();
+  const aside = dom.window.document.querySelector("aside");
+  aside.innerHTML = `<nav aria-label="Other navigation"><div class="overflow-y-auto">
+      <button>Other route</button></div></nav>
+    <nav role="navigation" aria-label="App navigation">
+      <div><div><button class="sidebar-item group"><span>New task</span></button></div></div>
+      <div><div class="overflow-y-auto" data-app-action-sidebar-scroll>
+        <section data-app-action-sidebar-section>
+          <div role="button" tabindex="0" class="sidebar-item group"
+            data-app-action-sidebar-project-row><span>Project</span></div>
+        </section>
+      </div></div>
+    </nav>`;
+  return dom;
+}
+
 function probe(dom) {
   return JSON.parse(JSON.stringify(dom.window.eval(rendererContractProbeExpression)));
 }
@@ -40,7 +81,9 @@ function probe(dom) {
 test("old, current and future Store versions are candidates, never unconditional support", () => {
   for (const version of [
     "26.818.5229.0", "26.818.8289.0", "26.820.7780.0", "26.825.3734.0",
-    "26.831.1445.0", "26.831.2377.0", "26.901.1.0", "27.1.0.0", "65535.65535.65535.65535",
+    "26.831.1445.0", "26.831.2377.0", "26.901.1.0", "26.917.1.0",
+    "26.924.1866.0", "26.924.2738.0", "26.924.2739.0", "26.925.1.0",
+    "27.1.0.0", "65535.65535.65535.65535",
   ]) {
     const decision = classifyWindowsCodexCompatibility({ platform: "win32", version });
     assert.equal(decision.mode, "contract-probe", version);
@@ -73,6 +116,185 @@ test("actual renderer fixture passes without modifying its DOM or calling the na
     assert.equal(result.compatible, true);
     assert.deepEqual(result.capabilities, allCapabilities);
     assert.equal(dom.serialize(), before);
+  } finally { dom.window.close(); }
+});
+
+test("updated Codex sidebar and split content frame pass the read-only contract", () => {
+  const dom = updatedFixture();
+  try {
+    dom.window.electronBridge.sendMessageFromView = () => { throw new Error("probe must not call RPC"); };
+    const before = dom.serialize();
+    const result = normalizeRendererContractProbe(probe(dom));
+    assert.equal(result.compatible, true);
+    assert.deepEqual(result.capabilities, allCapabilities);
+    assert.equal(dom.serialize(), before);
+    dom.window.document.querySelector('nav[role="navigation"]').remove();
+    assert.equal(normalizeRendererContractProbe(probe(dom)).compatible, false);
+  } finally { dom.window.close(); }
+});
+
+test("updated Codex navigation links qualify only inside the visible native sidebar", () => {
+  const dom = updatedFixture();
+  try {
+    const navigation = dom.window.document.querySelector('nav[role="navigation"]');
+    navigation.querySelectorAll("button.sidebar-item").forEach((button) => {
+      const link = dom.window.document.createElement("a");
+      link.className = button.className;
+      link.href = "/projects";
+      link.textContent = button.textContent;
+      button.replaceWith(link);
+    });
+    assert.equal(normalizeRendererContractProbe(probe(dom)).compatible, true);
+    navigation.querySelectorAll("a.sidebar-item").forEach((link) => link.removeAttribute("href"));
+    assert.equal(normalizeRendererContractProbe(probe(dom)).compatible, false);
+  } finally { dom.window.close(); }
+});
+
+test("read-only renderer shape reports counts without native labels or destinations", () => {
+  const dom = updatedFixture();
+  try {
+    const navigation = dom.window.document.querySelector('nav[role="navigation"]');
+    const scroll = navigation.querySelector("div.overflow-y-auto");
+    scroll.setAttribute("data-app-action-sidebar-scroll", "");
+    const before = dom.serialize();
+    const result = normalizeRendererContractProbe(probe(dom));
+    assert.equal(dom.serialize(), before);
+    assert.deepEqual(result.shape, {
+      sameScroll: true,
+      navigationElements: 4,
+      navigationButtons: 2,
+      navigationLinks: 0,
+      navigationRoleButtons: 0,
+      scrollButtons: 2,
+      scrollLinks: 0,
+      scrollRoleButtons: 0,
+      scrollSidebarItems: 2,
+      scrollElements: 3,
+      scrollDirectChildren: 1,
+    });
+    assert.equal(JSON.stringify(result.shape).includes("New task"), false);
+  } finally { dom.window.close(); }
+});
+
+test("a native navigation link remains a valid reference when modern and legacy scroll markers coincide", () => {
+  const dom = updatedFixture();
+  try {
+    const scroll = dom.window.document.querySelector("div.overflow-y-auto");
+    scroll.setAttribute("data-app-action-sidebar-scroll", "");
+    scroll.querySelectorAll("button.sidebar-item").forEach((button) => {
+      const link = dom.window.document.createElement("a");
+      link.className = "sidebar-item";
+      link.href = "/projects";
+      link.textContent = button.textContent;
+      button.replaceWith(link);
+    });
+    const result = normalizeRendererContractProbe(probe(dom));
+    assert.equal(result.compatible, true);
+    assert.equal(result.checks.legacyScroll, true);
+    assert.equal(result.checks.modernLink, true);
+    assert.equal(result.checks.modernReferenceInChosenScroll, true);
+    const referenceSource = injectionSource.slice(
+      injectionSource.indexOf("function findReferenceButton()"),
+      injectionSource.indexOf("function replaceEntryIcon("),
+    );
+    const context = vm.createContext({
+      document: dom.window.document,
+      getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    });
+    vm.runInContext(referenceSource, context);
+    assert.equal(vm.runInContext("findReferenceButton().tagName", context), "A");
+  } finally { dom.window.close(); }
+});
+
+test("26.924 fixed-header row qualifies only with one matching navigation and scroll", () => {
+  const dom = fixedHeaderFixture();
+  try {
+    const before = dom.serialize();
+    const result = normalizeRendererContractProbe(probe(dom));
+    assert.equal(result.compatible, true);
+    assert.equal(result.checks.headerReference, true);
+    assert.equal(result.checks.modernButton, false);
+    assert.equal(result.shape.sameScroll, true);
+    assert.equal(dom.serialize(), before);
+    const referenceSource = injectionSource.slice(
+      injectionSource.indexOf("function findReferenceButton()"),
+      injectionSource.indexOf("function replaceEntryIcon("),
+    );
+    const context = vm.createContext({
+      document: dom.window.document,
+      getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+      ENTRY_ID: "codex-taskboard-entry",
+      OWNED_ATTRIBUTE: "data-codex-taskboard-owned",
+    });
+    vm.runInContext(referenceSource, context);
+    assert.equal(vm.runInContext("findReferenceButton().textContent", context), "New task");
+    const header = dom.window.document.querySelector('nav[role="navigation"] > div:first-child');
+    header.insertAdjacentHTML("beforeend", `<button id="codex-taskboard-entry"
+      class="sidebar-item" data-codex-taskboard-owned="true">Agent Desk</button>`);
+    assert.equal(normalizeRendererContractProbe(probe(dom)).compatible, true);
+    assert.equal(vm.runInContext("findReferenceButton().textContent", context), "New task");
+    header.insertAdjacentHTML("beforeend", '<button class="sidebar-item">Ambiguous</button>');
+    assert.equal(normalizeRendererContractProbe(probe(dom)).compatible, false);
+    assert.equal(vm.runInContext("findReferenceButton()", context), null);
+  } finally { dom.window.close(); }
+});
+
+test("hidden old navigation cannot displace the visible updated sidebar", () => {
+  const dom = updatedFixture();
+  try {
+    dom.window.document.body.insertAdjacentHTML("afterbegin", `
+      <aside class="app-shell-left-panel" style="display:none">
+        <div data-app-action-sidebar-scroll><button>Plugins</button></div>
+      </aside>
+    `);
+    const result = normalizeRendererContractProbe(probe(dom));
+    assert.equal(result.compatible, true);
+    const referenceSource = injectionSource.slice(
+      injectionSource.indexOf("function findReferenceButton()"),
+      injectionSource.indexOf("function replaceEntryIcon("),
+    );
+    const context = vm.createContext({
+      document: dom.window.document,
+      getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    });
+    vm.runInContext(referenceSource, context);
+    assert.equal(vm.runInContext("findReferenceButton().textContent", context), "New task");
+    dom.window.document.querySelector("aside.app-shell-left-panel").style.display = "block";
+    assert.equal(normalizeRendererContractProbe(probe(dom)).compatible, false);
+  } finally { dom.window.close(); }
+});
+
+test("updated Codex entry and page mount use the same validated anchors", () => {
+  const dom = updatedFixture();
+  try {
+    const referenceSource = injectionSource.slice(
+      injectionSource.indexOf("function findReferenceButton()"),
+      injectionSource.indexOf("function replaceEntryIcon("),
+    );
+    const pageSource = injectionSource.slice(
+      injectionSource.indexOf("function findPageHost()"),
+      injectionSource.indexOf("function muteNativeSelection("),
+    );
+    const context = vm.createContext({
+      document: dom.window.document,
+      getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+    });
+    vm.runInContext(`${referenceSource}\n${pageSource}`, context);
+    assert.equal(vm.runInContext("findReferenceButton().textContent", context), "New task");
+    assert.equal(vm.runInContext("findPageMount().frameHost", context),
+      dom.window.document.querySelector("._MainContentFrame_example"));
+  } finally { dom.window.close(); }
+});
+
+test("updated sidebar ignores hidden copies and rejects two visible candidates", () => {
+  const dom = updatedFixture();
+  try {
+    const duplicate = dom.window.document.querySelector("aside").cloneNode(true);
+    duplicate.style.display = "none";
+    dom.window.document.body.prepend(duplicate);
+    assert.equal(normalizeRendererContractProbe(probe(dom)).compatible, true);
+    duplicate.style.display = "block";
+    assert.equal(normalizeRendererContractProbe(probe(dom)).compatible, false);
   } finally { dom.window.close(); }
 });
 
@@ -165,17 +387,26 @@ test("registered source does not inject or publish host configuration in an inco
   assert.equal(childWindow.testHostCapability, undefined);
 });
 
-test("an initial contract failure never enables Page/CSP, registers UI or installs bindings", async () => {
+test("an initial contract failure retains only a read-only observer without Page/CSP or bindings", async () => {
   const calls = [];
   const cdp = { send: async (method) => { calls.push(method); }, close: () => calls.push("close") };
   const fnSource = injectorSource.slice(injectorSource.indexOf("async function injectTarget("),
     injectorSource.indexOf("async function injectAll("));
   const inject = vm.runInNewContext(`(${fnSource})`, {
     probeRendererContract: async () => normalizeRendererContractProbe(null),
+    logLaunchDiagnostic() {},
   });
   const result = await inject({ connect: async () => cdp }, {}, false, null, true, {}, false, null,
     { mode: "contract-probe" });
   assert.equal(result.result.injected, false);
+  assert.equal(result.connection, null);
+  assert.equal(result.rejectionConnection, cdp);
+  assert.deepEqual(calls, ["Runtime.enable"]);
+  result.rejectionConnection.close();
+  assert.deepEqual(calls, ["Runtime.enable", "close"]);
+  calls.length = 0;
+  await inject({ connect: async () => cdp }, {}, false, null, false, {}, false, null,
+    { mode: "contract-probe" });
   assert.deepEqual(calls, ["Runtime.enable", "close"]);
 });
 

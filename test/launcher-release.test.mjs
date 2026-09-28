@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 import { test } from "node:test";
+import vm from "node:vm";
 
 const launcherSource = await readFile(new URL("../src-tauri/src/main.rs", import.meta.url), "utf8");
 const injectorSource = await readFile(new URL("../scripts/codex-injector.mjs", import.meta.url), "utf8");
@@ -15,6 +17,8 @@ test("the launcher uses one instance, serialized lifecycle changes, and a loopba
   assert.match(launcherSource, /TcpListener::bind\(\("127\.0\.0\.1", 0\)\)/);
   assert.equal(launcherSource.match(/TcpListener::bind/g)?.length, 1);
   assert.match(launcherSource, /command\.args\(\["--launch", "--watch", "--open", "--cdp-pipe"\]\)/);
+  assert.match(launcherSource, /command\.args\(\["--launch", "--watch", "--open", "--windows-registered"\]\)/);
+  assert.match(launcherSource, /\.env\("AGENT_DESK_WINDOWS_TRANSPORT", "registered-loopback"\)/);
   assert.doesNotMatch(launcherSource, /remote-debugging-port|user-data-dir|tauri_plugin_updater/);
   assert.doesNotMatch(injectorSource, /remote-debugging-port|user-data-dir|WebSocket\s*\(/);
   assert.match(injectorSource, /\["--remote-debugging-pipe"\]/);
@@ -46,16 +50,84 @@ test("quitting Taskboard detaches cleanly and preserves the managed Codex proces
   assert.match(launcherSource, /terminate_process_only\(pid\)/);
   assert.doesNotMatch(launcherSource, /无法保证在卸载注入后继续保持同一进程/);
   assert.match(injectorSource, /else if \(line\.trim\(\) === "stop-keep-codex"\)/);
-  assert.match(injectorSource, /codexPreservedOnExit: true/);
+  assert.match(injectorSource, /codexDetachRequested: true/);
   assert.match(injectorSource, /cleanup\(\{ preserveCodex: preserveCodexOnStop \}\)/);
 });
 
-test("Windows launcher and managed children do not expose a console window", () => {
+test("launcher reports renderer status without private page details or false success", () => {
+  assert.match(injectorSource, /rendererDiscovery: discovery/);
+  assert.match(injectorSource, /rendererInjection: \{/);
+  assert.match(injectorSource, /results\.push\(result\)/);
+  assert.doesNotMatch(injectorSource, /results\.push\(\{ targetId: target\.id, title: target\.title, url: target\.url/);
+  assert.match(launcherSource, /line\.contains\("\\\"rendererInjection\\\":"\)[\s\S]*?line\.contains\("\\\"injected\\\":true"\)/);
+  assert.doesNotMatch(launcherSource, /line\.contains\("\\\"injected\\\""\)/);
+});
+
+test("a failed private Codex pipe stops recovery instead of looping", () => {
+  assert.match(launcherSource, /let failed = !status\.as_ref\(\)\.is_ok_and\(\|exit\| exit\.success\(\)\)/);
+  assert.match(launcherSource, /if intentional \|\| failed \{\s*return;\s*\}/);
+  assert.match(launcherSource, /已停止自动重试/);
+});
+
+test("a renderer that never appears times out after the startup-policy window", () => {
+  assert.match(injectorSource, /const rendererDiscoveryTimeoutMs = 75_000/);
+  assert.match(injectorSource, /if \(!injectedOnce && rendererWaitMs >= rendererDiscoveryTimeoutMs\)/);
+  assert.match(injectorSource, /logLaunchDiagnostic\("renderer-waiting"/);
+  assert.match(injectorSource, /logLaunchDiagnostic\("renderer-timeout"/);
+  assert.match(injectorSource, /process\.exitCode = 1;\s*requestStop\(\{ preserveCodex: true \}\)/);
+  assert.match(launcherSource, /已停止等待。详情见启动诊断日志/);
+});
+
+test("diagnostic launch records lifecycle stages without page or account data", () => {
+  assert.match(launcherSource, /duration_since\(UNIX_EPOCH\)/);
+  assert.match(injectorSource, /launchDiagnostic: \{/);
+  assert.match(injectorSource, /agent-desk-startup\.jsonl/);
+  assert.match(injectorSource, /appendFileSync\(startupDiagnosticPath, `\$\{line\}\\n`/);
+  assert.match(injectorSource, /"spawn-started", "spawn-returned", "codex-exited", "cdp-output-ended"/);
+  assert.match(injectorSource, /logLaunchDiagnostic\("cdp-handshake"/);
+  assert.match(injectorSource, /logLaunchDiagnostic\("cdp-output-ended"/);
+  const diagnosticSource = injectorSource.slice(
+    injectorSource.indexOf("function logLaunchDiagnostic"),
+    injectorSource.indexOf("const taskboardOrigin"),
+  );
+  assert.doesNotMatch(diagnosticSource, /token|secret|title|url|account|conversation/i);
+});
+
+test("startup diagnostic file persists only allow-listed launch fields", () => {
+  const diagnosticSource = injectorSource.slice(
+    injectorSource.indexOf("function logLaunchDiagnostic"),
+    injectorSource.indexOf("const taskboardOrigin"),
+  );
+  const writes = [];
+  const directories = [];
+  vm.runInNewContext(`${diagnosticSource}\nlogLaunchDiagnostic("cdp-output-ended", { pid: 42, url: "secret-url", token: "secret-token" });\nlogLaunchDiagnostic("unknown-event", { pid: 43 });`, {
+    startupDiagnosticPath: "logs/diagnostic.jsonl",
+    mkdirSync: (directory) => directories.push(directory),
+    path,
+    appendFileSync: (filename, line) => writes.push({ filename, line }),
+    console: { log() {}, error() {} },
+    taskboardVersion: "test-version",
+    codexPackageVersion: "26.924.2738.0",
+    startupAttemptId: "f1ed7d9f-cfa5-4e47-b760-d4352398218c",
+    Date,
+    JSON,
+    Number,
+  });
+  assert.equal(writes.length, 1);
+  assert.deepEqual(directories, ["logs"]);
+  assert.equal(writes[0].filename, "logs/diagnostic.jsonl");
+  const record = JSON.parse(writes[0].line);
+  assert.equal(record.launchDiagnostic.event, "cdp-output-ended");
+  assert.equal(record.launchDiagnostic.pid, 42);
+  assert.doesNotMatch(writes[0].line, /secret-url|secret-token/);
+});
+
+test("Windows helper processes stay headless while Codex may create its GUI window", () => {
   assert.match(launcherSource, /const CREATE_NO_WINDOW: u32 = 0x08000000/);
   assert.match(launcherSource, /fn hidden_windows_command\(program: &str\) -> StdCommand/);
   assert.match(launcherSource, /command\.creation_flags\(CREATE_NO_WINDOW\)/);
   assert.match(injectorSource, /startTaskboard[\s\S]*?windowsHide: process\.platform === "win32"/);
-  assert.match(injectorSource, /launchCodexWithPipe[\s\S]*?windowsHide: process\.platform === "win32"/);
+  assert.match(injectorSource, /launchCodexWithPipe[\s\S]*?windowsHide: false/);
   assert.match(appServerSource, /windowsHide: process\.platform === "win32"/);
 });
 
@@ -115,6 +187,18 @@ test("Windows CI runs the Node suite and builds an unsigned NSIS installer", () 
 test("the packaged launcher includes every local renderer compatibility module", () => {
   assert.match(injectorSource, /from "\.\/codex-renderer-compatibility\.mjs"/);
   assert.match(prepareSource, /"codex-renderer-compatibility\.mjs"/);
+  for (const name of ["codex-cdp-loopback-candidate.mjs", "codex-registered-activation.ps1",
+    "codex-renderer-rejections.mjs", "codex-sidebar-diagnostic.mjs"]) {
+    assert.ok(prepareSource.includes(JSON.stringify(name)), name);
+  }
+});
+
+test("normal shutdown stops without relaunch and auxiliary failures cannot demote a ready host", () => {
+  assert.doesNotMatch(launcherSource, /let \(recovery_result, recovery_generation\)/);
+  assert.match(launcherSource, /snapshot\.phase = if failed \{ "error" \} else \{ "stopped" \}/);
+  assert.equal(launcherSource.match(/snapshot\.phase != "running"/g)?.length, 2);
+  assert.match(launcherSource, /rendererReloadRejected/);
+  assert.match(injectorSource, /const exitCode = cdpRuntime\?\.exitCode\?\.\(\) \?\? codexProcess\?\.exitCode/);
 });
 
 test("the Windows installer is current-user and never claims release signing", async () => {

@@ -33,6 +33,7 @@
   const NATIVE_PAGE_LABELS = [
     "新建任务",
     "新对话",
+    "新聊天",
     "new task",
     "new chat",
     "拉取请求",
@@ -261,8 +262,50 @@
   }
 
   function findReferenceButton() {
-    const scroll = document.querySelector("[data-app-action-sidebar-scroll]");
-    if (!scroll) return null;
+    const visibleSidebar = (candidate) => {
+      if (!candidate || candidate.closest('[inert], [aria-hidden="true"]')) return false;
+      const style = getComputedStyle(candidate);
+      const rect = candidate.getBoundingClientRect();
+      return style.display !== "none" && style.visibility !== "hidden"
+        && rect.width >= 160 && rect.height >= 180;
+    };
+    const legacyScrolls = Array.from(document.querySelectorAll(
+      "[data-app-action-sidebar-scroll]",
+    )).filter((candidate) => visibleSidebar(candidate.closest("aside"))
+      && candidate.getBoundingClientRect().width >= 100);
+    if (legacyScrolls.length > 1) return null;
+    const scroll = legacyScrolls[0] || null;
+    const sidebars = Array.from(document.querySelectorAll(
+      'aside[data-app-shell-left-panel-appearance]',
+    )).filter(visibleSidebar);
+    if (sidebars.length > 1 || (scroll && sidebars.length === 1
+      && !sidebars[0].contains(scroll))) return null;
+    const sidebar = sidebars.length === 1 ? sidebars[0] : null;
+    const navigations = Array.from(sidebar?.querySelectorAll(
+      'nav[role="navigation"][aria-label]',
+    ) || []);
+    const navigation = navigations.length === 1 ? navigations[0] : null;
+    const modernScrolls = Array.from(navigation?.querySelectorAll("div.overflow-y-auto") || []);
+    const modernScroll = modernScrolls.length === 1 ? modernScrolls[0] : null;
+    const modernReference = modernScroll?.querySelector(
+      "button.sidebar-item, a.sidebar-item[href]",
+    );
+    const scrollHosts = navigation && modernScroll
+      ? Array.from(navigation.children).filter((child) => child.contains(modernScroll)) : [];
+    const scrollHost = scrollHosts.length === 1 ? scrollHosts[0] : null;
+    const nativeChildren = nativeNavigationChildren(navigation, modernScroll);
+    const headerHost = nativeChildren.length === 2
+      && scrollHost?.previousElementSibling === nativeChildren[0]
+      ? nativeChildren[0] : null;
+    const headerButtons = headerHost
+      ? Array.from(headerHost.querySelectorAll("button.sidebar-item"))
+        .filter((button) => !(button.id === ENTRY_ID
+          && button.getAttribute(OWNED_ATTRIBUTE) === "true")) : [];
+    const headerReference = headerButtons.length === 1 && !modernScroll?.contains(headerButtons[0])
+      && headerButtons[0].parentElement ? headerButtons[0] : null;
+    if (!scroll) {
+      return sidebar?.contains(modernScroll) ? modernReference || headerReference : null;
+    }
     const buttons = Array.from(scroll.querySelectorAll("button"));
     const plugin = buttons.find((button) => buttonMatches(button, PLUGIN_LABELS));
     if (plugin?.parentElement) return plugin;
@@ -274,7 +317,35 @@
       return directButtons.length >= 3 && element.getBoundingClientRect().top < sectionTop;
     });
     const group = groups.sort((left, right) => right.children.length - left.children.length)[0];
-    return Array.from(group?.children || []).filter((child) => child.tagName === "BUTTON").at(-1) || null;
+    const legacyReference = Array.from(group?.children || [])
+      .filter((child) => child.tagName === "BUTTON").at(-1) || null;
+    return legacyReference || (scroll.contains(modernReference) ? modernReference : null)
+      || (scroll === modernScroll ? headerReference : null);
+  }
+
+  function nativeNavigationChildren(navigation, scroll) {
+    return Array.from(navigation?.children || []).filter((child) => !(
+      child.tagName === "SECTION" && child.id === "codex-taskboard-quota-display"
+      && child.getAttribute(OWNED_ATTRIBUTE) === "quota-display"
+      && child.previousElementSibling === scroll && scroll?.parentElement === navigation
+    ));
+  }
+
+  function headerMountForReference(reference) {
+    const navigation = reference?.closest('nav[role="navigation"][aria-label]');
+    const scrolls = Array.from(navigation?.querySelectorAll("div.overflow-y-auto") || []);
+    const nativeChildren = nativeNavigationChildren(navigation, scrolls[0]);
+    if (!navigation || scrolls.length !== 1 || nativeChildren.length !== 2) return null;
+    const scrollHost = Array.from(navigation.children)
+      .filter((child) => child.contains(scrolls[0]));
+    const headerHost = nativeChildren[0];
+    if (scrollHost.length !== 1 || scrollHost[0].previousElementSibling !== headerHost
+      || !headerHost?.contains(reference)) return null;
+    const nativeButtons = Array.from(headerHost.querySelectorAll("button.sidebar-item"))
+      .filter((button) => !(button.id === ENTRY_ID
+        && button.getAttribute(OWNED_ATTRIBUTE) === "true"));
+    return nativeButtons.length === 1 && nativeButtons[0] === reference
+      ? { navigation, scrollHost: scrollHost[0] } : null;
   }
 
   function replaceEntryIcon(button) {
@@ -293,7 +364,12 @@
   }
 
   function createEntry(reference) {
-    const button = reference.cloneNode(true);
+    const button = reference.tagName === "A" ? document.createElement("button")
+      : reference.cloneNode(true);
+    if (reference.tagName === "A") {
+      button.className = reference.className;
+      button.append(...Array.from(reference.childNodes, (node) => node.cloneNode(true)));
+    }
     button.id = ENTRY_ID;
     button.type = "button";
     button.removeAttribute("disabled");
@@ -338,7 +414,10 @@
     const reference = findReferenceButton();
     if (!reference?.parentElement) return;
     if (!entry) entry = createEntry(reference);
-    if (entry.parentElement !== reference.parentElement || entry.previousElementSibling !== reference) {
+    const headerMount = headerMountForReference(reference);
+    if (headerMount) entry.classList.add("w-full");
+    if (entry.parentElement !== reference.parentElement
+      || entry.previousElementSibling !== reference) {
       reference.after(entry);
     }
     syncEntryState();
@@ -348,8 +427,14 @@
     const direct = document.querySelector(".app-shell-main-content-frame");
     if (direct?.closest?.("[data-app-shell-main-content-layout]")) return direct;
 
-    const viewport = document.querySelector("[data-app-shell-main-content-layout]");
+    const viewport = document.querySelector(
+      'main[data-app-shell-main-surface="default"] [data-app-shell-main-content-layout]',
+    ) || document.querySelector("[data-app-shell-main-content-layout]");
     if (!viewport) return null;
+    const focusHosts = Array.from(viewport.children).filter((candidate) => (
+      candidate.querySelector('[data-app-shell-focus-area="main"]')
+    ));
+    if (focusHosts.length === 1) return focusHosts[0];
     const viewportRect = viewport.getBoundingClientRect();
     return Array.from(viewport.children).find((candidate) => {
       const rect = candidate.getBoundingClientRect();
@@ -395,6 +480,16 @@
       .forEach((surface) => {
         Array.from(surface.children).forEach((child) => {
           if (child.getAttribute(OWNED_ATTRIBUTE) !== "true") {
+            child.setAttribute(HIDDEN_ATTRIBUTE, "true");
+          }
+        });
+        // New Chat renders its mode switch beside, rather than inside, the titlebar
+        // surface. Restrict suppression to native chrome in that same shell header;
+        // leave its drag area and unmarked window controls intact.
+        const header = surface.closest("header[data-app-shell-header-layout]");
+        header?.querySelectorAll("[data-app-shell-header-obstacle]").forEach((child) => {
+          if (child.closest("header[data-app-shell-header-layout]") === header
+            && !child.closest(`[${OWNED_ATTRIBUTE}="true"]`)) {
             child.setAttribute(HIDDEN_ATTRIBUTE, "true");
           }
         });
@@ -1791,6 +1886,9 @@
     if (!clickable || clickable === entry || clickable.closest(`#${ENTRY_ID}`)) return false;
     if (!clickable.closest("aside nav[role='navigation']")) return false;
     if (clickable.hasAttribute("data-app-action-sidebar-section-toggle")) return false;
+    // The validated fixed header row is the native New Chat action. Its identity
+    // survives translations and labels containing keyboard shortcut text.
+    if (headerMountForReference(clickable)) return true;
     if (buttonMatches(clickable, NATIVE_PAGE_LABELS)) return true;
     return Boolean(clickable.closest(
       "[data-app-action-sidebar-thread-id],"

@@ -11,7 +11,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 root = Path(__file__).resolve().parent.parent
 roots = {"web", "server", "shared", "cli", "inject", "scripts", "test", "skills", "plugins", "licenses", "src-tauri"}
 top = {"package.json", "package-lock.json", "README.md", "README.zh-CN.md", "AGENTS.md", "LICENSE", "NOTICE", "PRIVACY.md", ".gitignore"}
-docs = {"docs/architecture.md", "docs/product-identity.md", "docs/publishing.md", "docs/licensing.md", "docs/assets/allowance-preview.jpg"}
+docs = {"docs/architecture.md", "docs/product-identity.md", "docs/publishing.md", "docs/licensing.md", "docs/startup-diagnostics.md", "docs/release-1.2.2.md", "docs/assets/allowance-preview.png"}
 exclude_parts = {"node_modules", "target", "resources", "binaries", "gen", ".git", ".agents", ".codex", ".hermes", "__pycache__", ".venv", ".data", "logs"}
 paths = subprocess.check_output(["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"], cwd=root).decode().split("\0")
 selected = []

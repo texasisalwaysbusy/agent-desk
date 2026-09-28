@@ -19,26 +19,32 @@ Agent Desk 在官方 Codex 桌面应用内提供项目任务管理、执行进�
 
 ## 效果示例
 
-![Agent Desk 中英文额度面板，使用演示数据](docs/assets/allowance-preview.jpg)
+![Agent Desk 中英文无边框侧栏额度栏，使用演示数据](docs/assets/allowance-preview.png)
 
 侧栏额度卡展示 **5 小时与每周的剩余使用比例、重置倒计时**，帮助判断何时继续安排任务。
-这里的“额度”指使用限额，不是现金余额。示例由当前组件代码与演示数据渲染，
+这里的“额度”指使用限额，不是现金余额。示例使用实际的 1.0.6 无边框组件与演示数据
+渲染，嵌入侧栏底部，并保留随剩余额度变化的颜色。
 不包含真实账户信息；示例容器并非完整 Codex 界面，也不替代安装后的真实验收。
 
 ## 下载安装
 
-**[下载 Agent Desk 1.2.0 · Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.0/Agent-Desk-1.2.0-Windows-x64-setup.exe)**
+**[下载 Agent Desk 1.2.2 · Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.2/Agent-Desk-1.2.2-Windows-x64-setup.exe)**
 
-[中英文发行说明与 SHA-256 校验文件](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.0)
+[中英文发行说明与 SHA-256 校验文件](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.2)
 
-当前支持 Windows x64，按当前用户安装，安装包未数字签名。自动化检查、Windows
-构建与打包后的服务验证已通过；真实宿主安装、旧数据复用安装和人工审批执行仍待
-端到端验收。其他平台的遗留文件不代表支持承诺。
+当前支持 Windows x64，按当前用户安装，安装包未数字签名。等价的 rc.6 实现已在
+Codex 26.924.2738.0 上完成安装、启动、工作台与额度栏显示、首次正常退出和手动重开
+验收。1.2.2 将该实现以稳定版本标识和 Release 编译发布。第二轮 Codex 退出码及托盘
+版本文字未确认；安装文件哈希已核对。本次验收不代表人工审批执行流程已认证。
+其他平台的遗留文件不代表支持承诺。
 
 安装前请正常退出 Codex 与旧版 Taskboard 托盘程序，保留旧版安装及数据作为回退点，
 不要同时运行两套启动器。
 
 ## 开发与验证
+
+Codex 启动失败时，可从独立终端运行[实时启动诊断](docs/startup-diagnostics.md)，
+供 Hermes 只读观察，不依赖工作台窗口。
 
 使用 Node.js 24、npm；Windows 打包还需要 Rust stable 1.88+、MSVC C++ 和 Windows SDK。
 
@@ -58,8 +64,15 @@ npm run app:build:windows
 存在时停止并提示核对，不自动复制、合并或删除。新安装身份不会静默覆盖旧应用，
 具体切换边界见[命名与兼容](docs/product-identity.md)。
 
-工作台使用已安装的签名 Codex 程序和现有登录，不建立第二份登录资料，不读取
-认证数据库，不开放调试 TCP 端口。服务仅监听本机回环地址。
+Windows 启动器通过已注册的 Store 包启动 Codex，沿用现有登录。
+每次手动启动都重新查找安装包并验证签名，注入前检查界面结构。小版本号变化不需要
+更新白名单；未知结构会停止注入，不能保证所有未来版本都兼容。
+
+这一启动路线会开放由 Codex 进程持有的随机 `127.0.0.1` 调试端口，同机其他程序
+可以连接它；该端口不受工作台 API 的认证保护。不建立第二份登录资料，不读取认证
+数据库，也不连接普通启动的 Codex。请先正常退出 Codex，再启动 Agent Desk。
+正式安装包采用 Release 编译，保留脱敏的启动诊断和错误日志。独立开发实验不是默认
+启动路线。本地保留 rc.6 方便继续诊断时，无需覆盖成 GitHub 的稳定版。
 
 ## 许可与公开发布
 

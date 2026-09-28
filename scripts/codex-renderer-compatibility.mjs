@@ -7,15 +7,46 @@ const rendererContractProbeExpression = String.raw`(() => {
   const pluginLabels = ["插件", "plugins"];
   const appProtocol = window.location.protocol === "app:";
   const topFrame = window.top === window;
-  const sidebarScroll = document.querySelector("[data-app-action-sidebar-scroll]");
-  const sidebar = sidebarScroll?.closest("aside") || document.querySelector(
-    'aside.app-shell-left-panel, aside[data-testid="app-shell-floating-left-panel"]',
-  );
-  const viewport = document.querySelector("[data-app-shell-main-content-layout]");
+  const visibleSidebar = (candidate) => {
+    if (!candidate || candidate.closest('[inert], [aria-hidden="true"]')) return false;
+    const style = getComputedStyle(candidate);
+    const rect = candidate.getBoundingClientRect();
+    return style.display !== "none" && style.visibility !== "hidden"
+      && rect.width >= 160 && rect.height >= 180;
+  };
+  const legacyScrolls = Array.from(document.querySelectorAll(
+    "[data-app-action-sidebar-scroll]",
+  )).filter((candidate) => visibleSidebar(candidate.closest("aside"))
+    && candidate.getBoundingClientRect().width >= 100);
+  const legacyScroll = legacyScrolls.length === 1 ? legacyScrolls[0] : null;
+  const modernSidebars = Array.from(document.querySelectorAll(
+    'aside[data-app-shell-left-panel-appearance]',
+  )).filter(visibleSidebar);
+  const modernSidebar = modernSidebars.length === 1 ? modernSidebars[0] : null;
+  const modernNavigations = Array.from(modernSidebar?.querySelectorAll(
+    'nav[role="navigation"][aria-label]',
+  ) || []);
+  const modernNavigation = modernNavigations.length === 1 ? modernNavigations[0] : null;
+  const modernScrolls = Array.from(modernNavigation?.querySelectorAll("div.overflow-y-auto") || []);
+  const modernScroll = modernScrolls.length === 1 ? modernScrolls[0] : null;
+  const ambiguousSidebars = legacyScrolls.length > 1 || modernSidebars.length > 1
+    || (legacyScroll && modernSidebar && !modernSidebar.contains(legacyScroll));
+  const sidebarScroll = ambiguousSidebars ? null
+    : legacyScroll || (modernSidebar?.contains(modernScroll) ? modernScroll : null);
+  const sidebar = legacyScroll?.closest("aside") || modernSidebar;
+  const viewport = document.querySelector(
+    'main[data-app-shell-main-surface="default"] [data-app-shell-main-content-layout]',
+  ) || document.querySelector("[data-app-shell-main-content-layout]");
   const directFrameHost = document.querySelector(".app-shell-main-content-frame");
   let frameHost = directFrameHost?.closest?.("[data-app-shell-main-content-layout]")
     ? directFrameHost
     : null;
+  if (!frameHost && viewport) {
+    const focusHosts = Array.from(viewport.children).filter((candidate) => (
+      candidate.querySelector('[data-app-shell-focus-area="main"]')
+    ));
+    if (focusHosts.length === 1) frameHost = focusHosts[0];
+  }
   if (!frameHost && viewport) {
     const viewportRect = viewport.getBoundingClientRect();
     frameHost = Array.from(viewport.children).find((candidate) => {
@@ -43,17 +74,60 @@ const rendererContractProbeExpression = String.raw`(() => {
       return directButtons.length >= 3 && element.getBoundingClientRect().top < sectionTop;
     }).sort((left, right) => right.children.length - left.children.length)[0]
     : null;
+  const modernButton = modernScroll?.querySelector("button.sidebar-item");
+  const modernLink = modernScroll?.querySelector("a.sidebar-item[href]");
+  const modernReference = modernScroll?.querySelector("button.sidebar-item, a.sidebar-item[href]");
+  // In the 26.924 shell the fixed navigation header precedes the thread scroller.
+  // Require their unique direct-child relationship before accepting its native row.
+  const scrollHosts = modernNavigation && modernScroll
+    ? Array.from(modernNavigation.children).filter((child) => child.contains(modernScroll)) : [];
+  const scrollHost = scrollHosts.length === 1 ? scrollHosts[0] : null;
+  // A direct native scroller gains our own adjacent quota section. It is not a
+  // new native navigation section; ignore only its exact owner and position.
+  const nativeNavigationChildren = Array.from(modernNavigation?.children || []).filter((child) => !(
+    child.tagName === "SECTION" && child.id === "codex-taskboard-quota-display"
+    && child.getAttribute("data-codex-taskboard-owned") === "quota-display"
+    && child.previousElementSibling === modernScroll
+    && modernScroll?.parentElement === modernNavigation
+  ));
+  const headerHost = nativeNavigationChildren.length === 2
+    && scrollHost?.previousElementSibling === nativeNavigationChildren[0]
+    ? nativeNavigationChildren[0] : null;
+  const headerButtons = headerHost
+    ? Array.from(headerHost.querySelectorAll("button.sidebar-item"))
+      .filter((button) => !(button.id === "codex-taskboard-entry"
+        && button.getAttribute("data-codex-taskboard-owned") === "true")) : [];
+  const headerReference = headerButtons.length === 1 && !modernScroll?.contains(headerButtons[0])
+    && Boolean(headerButtons[0].parentElement);
+  const legacyReference = Boolean(pluginButton?.parentElement
+    || Array.from(fallbackGroup?.children || []).some((child) => child.tagName === "BUTTON"));
   const referenceButton = Boolean(
-    pluginButton?.parentElement
-    || Array.from(fallbackGroup?.children || []).some((child) => child.tagName === "BUTTON"),
+    legacyReference
+    || (modernReference && sidebarScroll?.contains(modernReference))
+    || (headerReference && sidebarScroll === modernScroll),
   );
   const nativeBridge = Boolean(
     window.electronBridge
     && typeof window.electronBridge.sendMessageFromView === "function",
   );
+  const count = (root, selector) => Math.min(root?.querySelectorAll(selector).length || 0, 1000);
+  const shape = {
+    sameScroll: Boolean(legacyScroll && modernScroll && legacyScroll === modernScroll),
+    navigationElements: count(modernNavigation, "*"),
+    navigationButtons: count(modernNavigation, "button"),
+    navigationLinks: count(modernNavigation, "a[href]"),
+    navigationRoleButtons: count(modernNavigation, '[role="button"]'),
+    scrollButtons: count(sidebarScroll, "button"),
+    scrollLinks: count(sidebarScroll, "a[href]"),
+    scrollRoleButtons: count(sidebarScroll, '[role="button"]'),
+    scrollSidebarItems: count(sidebarScroll, ".sidebar-item"),
+    scrollElements: count(sidebarScroll, "*"),
+    scrollDirectChildren: Math.min(sidebarScroll?.children.length || 0, 1000),
+  };
   const fullPanel = Boolean(appProtocol && topFrame && sidebarScroll && pageMount && referenceButton);
   return {
     schemaVersion: 1,
+    shape,
     checks: {
       appProtocol,
       topFrame,
@@ -62,6 +136,13 @@ const rendererContractProbeExpression = String.raw`(() => {
       pageMount,
       referenceButton,
       nativeBridge,
+      legacyScroll: Boolean(legacyScroll),
+      modernScroll: Boolean(modernScroll),
+      legacyReference,
+      modernButton: Boolean(modernButton),
+      modernLink: Boolean(modernLink),
+      modernReferenceInChosenScroll: Boolean(modernReference && sidebarScroll?.contains(modernReference)),
+      headerReference: Boolean(headerReference && sidebarScroll === modernScroll),
     },
     capabilities: {
       fullPanel,
@@ -113,6 +194,26 @@ function normalizeRendererContractProbe(value) {
     pageMount: value.checks?.pageMount === true,
     referenceButton: value.checks?.referenceButton === true,
     nativeBridge: value.checks?.nativeBridge === true,
+    legacyScroll: value.checks?.legacyScroll === true,
+    modernScroll: value.checks?.modernScroll === true,
+    legacyReference: value.checks?.legacyReference === true,
+    modernButton: value.checks?.modernButton === true,
+    modernLink: value.checks?.modernLink === true,
+    modernReferenceInChosenScroll: value.checks?.modernReferenceInChosenScroll === true,
+    headerReference: value.checks?.headerReference === true,
+  };
+  const shapeKeys = [
+    "navigationElements", "navigationButtons", "navigationLinks", "navigationRoleButtons",
+    "scrollButtons", "scrollLinks", "scrollRoleButtons", "scrollSidebarItems",
+    "scrollElements", "scrollDirectChildren",
+  ];
+  const shape = {
+    ...(typeof value.shape?.sameScroll === "boolean"
+      ? { sameScroll: value.shape.sameScroll } : {}),
+    ...Object.fromEntries(shapeKeys
+      .filter((key) => Number.isInteger(value.shape?.[key])
+        && value.shape[key] >= 0 && value.shape[key] <= 1000)
+      .map((key) => [key, value.shape[key]])),
   };
   // Never accept a claimed capability when its prerequisite checks are absent.
   const fullPanel = checks.appProtocol && checks.topFrame && checks.sidebarScroll
@@ -128,6 +229,7 @@ function normalizeRendererContractProbe(value) {
     reason: capabilities.fullPanel ? null : "renderer-contract-mismatch",
     checks,
     capabilities,
+    shape,
   };
 }
 

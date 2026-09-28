@@ -16,7 +16,7 @@ use std::{
         Arc, Mutex,
     },
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 #[cfg(target_os = "windows")]
 use std::{
@@ -70,6 +70,13 @@ struct LauncherRuntimeDescriptor {
 
 #[cfg(target_os = "windows")]
 #[derive(Clone)]
+struct ManagedCodexProcess {
+    pid: u32,
+    attempt_id: String,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Clone)]
 struct WindowsCodexPackage {
     app_path: PathBuf,
     version: String,
@@ -96,6 +103,8 @@ struct LauncherState {
     child_control: Mutex<Option<ChildStdin>>,
     #[cfg(target_os = "windows")]
     codex_package: Mutex<Option<WindowsCodexPackage>>,
+    #[cfg(target_os = "windows")]
+    managed_codex: Mutex<Option<ManagedCodexProcess>>,
     _instance_lock: File,
     data_directory: PathBuf,
     log_path: PathBuf,
@@ -132,6 +141,8 @@ impl LauncherState {
             child_control: Mutex::new(None),
             #[cfg(target_os = "windows")]
             codex_package: Mutex::new(None),
+            #[cfg(target_os = "windows")]
+            managed_codex: Mutex::new(None),
             _instance_lock: instance_lock,
             pid_record_path: data_directory.join("launcher-child.json"),
             data_directory,
@@ -282,6 +293,7 @@ fn update_snapshot(
                 match snapshot.phase.as_str() {
                     "running" => "运行状态：正常",
                     "error" => "运行状态：异常",
+                    "stopped" => "运行状态：已停止",
                     _ => "运行状态：启动中",
                 }
             };
@@ -297,6 +309,57 @@ fn append_log(state: &LauncherState, line: &str) {
         .create(true)
         .append(true)
         .open(&state.log_path)
+    {
+        let timestamp_ms = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_millis());
+        let _ = writeln!(file, "{timestamp_ms} {line}");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn managed_codex_spawn(line: &str) -> Option<ManagedCodexProcess> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let diagnostic = value.get("launchDiagnostic")?;
+    if diagnostic.get("event")?.as_str()? != "spawn-returned" {
+        return None;
+    }
+    let pid = u32::try_from(diagnostic.get("pid")?.as_u64()?).ok()?;
+    let attempt_id = diagnostic.get("attemptId")?.as_str()?;
+    Uuid::parse_str(attempt_id).ok()?;
+    Some(ManagedCodexProcess {
+        pid,
+        attempt_id: attempt_id.to_string(),
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn append_managed_codex_observation(
+    state: &LauncherState,
+    managed: &ManagedCodexProcess,
+    elapsed_seconds: u32,
+) {
+    let running = process_group_is_running(managed.pid);
+    let version = state.snapshot.lock().unwrap().version.clone();
+    let at_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_millis());
+    let line = serde_json::json!({
+        "launchDiagnostic": {
+            "atMs": at_ms,
+            "event": "managed-process-after-injector-exit",
+            "attemptId": managed.attempt_id,
+            "agentDeskVersion": version,
+            "pid": managed.pid,
+            "elapsedSeconds": elapsed_seconds,
+            "running": running,
+        }
+    });
+    let diagnostic_path = state.log_path.with_file_name("agent-desk-startup.jsonl");
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(diagnostic_path)
     {
         let _ = writeln!(file, "{line}");
     }
@@ -857,6 +920,12 @@ fn watch_launcher_output<R: std::io::Read + Send + 'static>(
     thread::spawn(move || {
         for line in BufReader::new(reader).lines().map_while(Result::ok) {
             append_log(&state, &line);
+            #[cfg(target_os = "windows")]
+            if !is_stderr && state.generation.load(Ordering::SeqCst) == generation {
+                if let Some(managed) = managed_codex_spawn(&line) {
+                    *state.managed_codex.lock().unwrap() = Some(managed);
+                }
+            }
             if is_stderr && line.contains("Waiting for Codex") {
                 update_snapshot(&app, &state, |snapshot| {
                     if state.generation.load(Ordering::SeqCst) == generation
@@ -905,13 +974,73 @@ fn watch_launcher_output<R: std::io::Read + Send + 'static>(
                         snapshot.message = "任务面板已在现有 Codex 的浏览面板中打开。".into();
                     }
                 });
-            } else if !is_stderr && line.contains("\"injected\"") {
+            } else if !is_stderr
+                && line.contains("\"rendererInjection\":")
+                && line.contains("\"injected\":true")
+            {
                 update_snapshot(&app, &state, |snapshot| {
                     if state.generation.load(Ordering::SeqCst) == generation
                         && snapshot.child_pid == Some(pid)
                     {
                         snapshot.phase = "running".into();
                         snapshot.message = "任务面板已在 Codex 客户端中打开。".into();
+                    }
+                });
+            } else if !is_stderr
+                && line.contains("\"rendererInjection\":")
+                && line.contains("\"injected\":false")
+            {
+                update_snapshot(&app, &state, |snapshot| {
+                    if state.generation.load(Ordering::SeqCst) == generation
+                        && snapshot.child_pid == Some(pid)
+                        && snapshot.phase != "running"
+                    {
+                        snapshot.phase = "starting".into();
+                        snapshot.message = "Codex 已启动，工作台尚未通过侧栏兼容检查。".into();
+                    }
+                });
+            } else if !is_stderr
+                && line.contains("\"rendererDiscovery\":")
+                && line.contains("\"eligible\":0")
+            {
+                update_snapshot(&app, &state, |snapshot| {
+                    if state.generation.load(Ordering::SeqCst) == generation
+                        && snapshot.child_pid == Some(pid)
+                        && snapshot.phase != "running"
+                    {
+                        snapshot.phase = "starting".into();
+                        snapshot.message = "Codex 已启动，正在寻找可用的主界面…".into();
+                    }
+                });
+            } else if !is_stderr && line.contains("\"rendererReloadRejected\":true") {
+                update_snapshot(&app, &state, |snapshot| {
+                    if state.generation.load(Ordering::SeqCst) == generation
+                        && snapshot.child_pid == Some(pid)
+                    {
+                        snapshot.phase = "error".into();
+                        snapshot.message =
+                            "Codex 界面变化后未通过兼容检查；工作台已停止注入。".into();
+                    }
+                });
+            } else if !is_stderr && line.contains("\"event\":\"renderer-timeout\"") {
+                update_snapshot(&app, &state, |snapshot| {
+                    if state.generation.load(Ordering::SeqCst) == generation
+                        && snapshot.child_pid == Some(pid)
+                    {
+                        snapshot.phase = "error".into();
+                        snapshot.message =
+                            "Codex 未提供可用主界面，已停止等待。详情见启动诊断日志。".into();
+                    }
+                });
+            } else if !is_stderr && line.contains("\"event\":\"startup-failed\"") {
+                update_snapshot(&app, &state, |snapshot| {
+                    if state.generation.load(Ordering::SeqCst) == generation
+                        && snapshot.child_pid == Some(pid)
+                    {
+                        snapshot.phase = "error".into();
+                        snapshot.message =
+                            "Codex 未完成启动，Agent Desk 已停止自动重试。请查看官方错误提示。"
+                                .into();
                     }
                 });
             }
@@ -1025,6 +1154,9 @@ fn start_launcher_locked(
     command.arg(&injector_path);
     #[cfg(target_os = "windows")]
     command.arg(r"scripts\codex-injector.mjs");
+    #[cfg(target_os = "windows")]
+    command.args(["--launch", "--watch", "--open", "--windows-registered"]);
+    #[cfg(not(target_os = "windows"))]
     command.args(["--launch", "--watch", "--open", "--cdp-pipe"]);
     command
         .args(["--startup-token", &instance_token, "--app-path"])
@@ -1044,7 +1176,10 @@ fn start_launcher_locked(
         .env("CODEX_TASKBOARD_INSTANCE_SECRET", &instance_secret)
         .env("CODEX_TASKBOARD_VERSION", &version);
     #[cfg(target_os = "windows")]
-    command.env("CODEX_TASKBOARD_CODEX_VERSION", &codex_package_version);
+    command
+        .env("CODEX_TASKBOARD_CODEX_VERSION", &codex_package_version)
+        .env("AGENT_DESK_WINDOWS_TRANSPORT", "registered-loopback")
+        .env_remove("AGENT_DESK_LOOPBACK_CANDIDATE");
     command
         .env("CODEX_TASKBOARD_SKILL_PATH", &manage_taskboard_skill_path)
         .env_remove("CODEX_API_KEY")
@@ -1073,6 +1208,10 @@ fn start_launcher_locked(
             Ok(())
         });
     }
+    #[cfg(target_os = "windows")]
+    {
+        *state.managed_codex.lock().unwrap() = None;
+    }
     let mut child = command.spawn().map_err(|error| error.to_string())?;
     let pid = child.id();
     #[cfg(target_os = "windows")]
@@ -1095,7 +1234,7 @@ fn start_launcher_locked(
     append_log(
         state,
         &format!(
-            "Started launcher child {pid} on Taskboard {taskboard_port} with a private Codex CDP pipe"
+            "Started launcher child {pid} on Taskboard {taskboard_port} using a validated Codex debug transport"
         ),
     );
     if let Some(stdout) = stdout {
@@ -1145,6 +1284,9 @@ fn start_launcher_locked(
             return;
         };
         let intentional = event_state.intentional_stop.load(Ordering::SeqCst);
+        let failed = !status.as_ref().is_ok_and(|exit| exit.success());
+        #[cfg(target_os = "windows")]
+        let managed_codex = event_state.managed_codex.lock().unwrap().take();
         update_snapshot(&event_app, &event_state, |snapshot| {
             if event_state.generation.load(Ordering::SeqCst) == recovery_token
                 && snapshot.child_pid == Some(pid)
@@ -1152,8 +1294,16 @@ fn start_launcher_locked(
                 snapshot.child_pid = None;
                 snapshot.open_signal_pid = None;
                 if !intentional {
-                    snapshot.phase = "error".into();
-                    snapshot.message = "任务面板进程已退出，正在恢复…".into();
+                    let had_specific_error = snapshot.phase == "error";
+                    snapshot.phase = if failed { "error" } else { "stopped" }.into();
+                    snapshot.message = if failed && had_specific_error {
+                        snapshot.message.clone()
+                    } else if failed {
+                        "Codex 调试连接中断，已停止自动重试。请正常退出 Codex 后从托盘重新打开。"
+                            .into()
+                    } else {
+                        "Codex 已正常退出；从托盘重新打开时将重新验证当前安装版本。".into()
+                    };
                 }
             }
         });
@@ -1163,38 +1313,24 @@ fn start_launcher_locked(
         );
         terminate_process_group(pid);
         clear_pid_record(&event_state, pid);
-        if intentional {
+        #[cfg(target_os = "windows")]
+        if failed && !intentional {
+            if let Some(managed) = managed_codex {
+                append_managed_codex_observation(&event_state, &managed, 0);
+                let observation_state = event_state.clone();
+                thread::spawn(move || {
+                    thread::sleep(Duration::from_secs(2));
+                    append_managed_codex_observation(&observation_state, &managed, 2);
+                    thread::sleep(Duration::from_secs(3));
+                    append_managed_codex_observation(&observation_state, &managed, 5);
+                });
+            }
+        }
+        if intentional || failed {
             return;
         }
-        thread::sleep(Duration::from_secs(2));
-        let (recovery_result, recovery_generation) = {
-            let _lifecycle = event_state.lifecycle.lock().unwrap();
-            if event_state.generation.load(Ordering::SeqCst) != recovery_token
-                || event_state.intentional_stop.load(Ordering::SeqCst)
-            {
-                return;
-            }
-            let result = start_launcher_locked(&event_app, &event_state);
-            let generation = event_state.generation.load(Ordering::SeqCst);
-            (result, generation)
-        };
-        if let Err(error) = recovery_result {
-            append_log(&event_state, &format!("Launcher recovery failed: {error}"));
-            update_snapshot(&event_app, &event_state, |snapshot| {
-                if event_state.generation.load(Ordering::SeqCst) == recovery_generation
-                    && snapshot.child_pid.is_none()
-                {
-                    snapshot.phase = "error".into();
-                    snapshot.message = error.clone();
-                    snapshot.open_signal_pid = None;
-                }
-            });
-            show_error_dialog(
-                &event_app,
-                "Agent Desk 恢复失败",
-                &format!("任务面板进程无法恢复：{error}\n\n请重新打开 App。"),
-            );
-        }
+        // A normal Codex exit stays stopped. A manual tray restart resolves the
+        // current registered package and validates its renderer again.
     });
     Ok(snapshot)
 }
@@ -1317,6 +1453,21 @@ mod identity_tests {
             base.join("DashiTaskboard")
         );
         assert!(select_data_root(base, true, true).is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn managed_codex_pid_uses_only_bounded_spawn_diagnostics() {
+        let attempt = "f1ed7d9f-cfa5-4e47-b760-d4352398218c";
+        let line = format!(
+            "{{\"launchDiagnostic\":{{\"event\":\"spawn-returned\",\"pid\":31824,\"attemptId\":\"{attempt}\"}}}}"
+        );
+        let managed = managed_codex_spawn(&line).unwrap();
+        assert_eq!(managed.pid, 31824);
+        assert_eq!(managed.attempt_id, attempt);
+        assert!(managed_codex_spawn(&line.replace("spawn-returned", "renderer-timeout")).is_none());
+        assert!(managed_codex_spawn(&line.replace(attempt, "not-a-uuid")).is_none());
+        assert!(managed_codex_spawn("not json").is_none());
     }
 }
 

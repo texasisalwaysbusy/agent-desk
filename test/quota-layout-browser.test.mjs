@@ -12,21 +12,34 @@ const chrome = [process.env.CHROME_BIN, "C:/Program Files/Google/Chrome/Applicat
   "/usr/bin/google-chrome", "/usr/bin/chromium"].find((candidate) => candidate && existsSync(candidate));
 const source = await readFile(new URL("../inject/codex-quota-display.user.js", import.meta.url), "utf8");
 
-function fixture({ width, zoom, reset }) {
-  return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><style>
+function fixture({ width, zoom, reset, modern = false, dark = false, language = "zh-CN", stale = false }) {
+  return `<!doctype html><html lang="${language}"><meta charset="utf-8"><style>
     ${reset ? "*,::before,::after { box-sizing:border-box; margin:0; padding:0; border:0 solid; }" : ""}
-    html,body { margin:0; font-family:system-ui; background:white; }
+    html,body { margin:0; font-family:system-ui; color-scheme:${dark ? "dark" : "light"}; background:${dark ? "#202020" : "white"}; }
     body { zoom:${zoom}; }
-    aside { position:relative; width:${width}px; height:420px; background:#f5f5f5; overflow:hidden; }
+    ${modern ? `:root { --font-sans:"Segoe UI",system-ui,sans-serif; --radius-lg:12px;
+      --color-text:${dark ? "#ededed" : "#202020"}; --color-text-secondary:${dark ? "#b5b5b5" : "#656565"};
+      --color-surface:${dark ? "#222222" : "#ffffff"}; --color-border:${dark ? "#3b3b3b" : "#e5e5e5"};
+      --color-text-success:${dark ? "#66bd92" : "#278459"}; --color-text-warning:${dark ? "#d9b75f" : "#946b00"};
+      --color-text-danger:${dark ? "#f18b88" : "#b42318"}; }` : ""}
+    aside { position:relative; width:${width}px; height:420px; margin-left:${modern ? 56 : 0}px; background:${dark ? "#282828" : "#f5f5f5"}; overflow:hidden; }
     nav { height:100%; display:flex; flex-direction:column; }
     [data-app-action-sidebar-scroll] { flex:1; min-height:0; overflow:auto; }
     .tasks { height:900px; padding:16px; }
     footer { position:absolute; bottom:0; left:0; right:0; height:40px; padding:8px 16px;
       box-sizing:border-box; background:#ddd9; z-index:2; display:flex; justify-content:space-between; }
     [data-settings-panel-slug] { width:400px; height:300px; }
-  </style><aside class="app-shell-left-panel"><nav><div data-app-action-sidebar-scroll><div class="tasks">模拟会话列表</div></div></nav>
-  <footer><button>◉ 用户</button><button>语音</button></footer></aside><pre id="result"></pre>
+    #rail { position:absolute; width:56px; height:420px; }
+    #rail footer { width:56px; right:auto; padding:8px; }
+  </style>${modern ? '<div id="rail"><footer><button>◉</button></footer></div>' : ''}
+  <aside class="app-shell-left-panel" ${modern ? 'data-app-shell-left-panel-appearance="content-surface"' : ''}>
+  <nav ${modern ? 'role="navigation" aria-label="App navigation"' : ''}>
+  ${modern ? '<div><button class="sidebar-item">新聊天</button><button data-codex-taskboard-owned="true">智能体工作台</button></div>' : ''}
+  <div class="overflow-y-auto" data-app-action-sidebar-scroll><div class="tasks">模拟会话列表</div></div></nav>
+  ${modern ? '' : '<footer><button>◉ 用户</button><button>语音</button></footer>'}</aside><pre id="result"></pre>
   <script>
+    // Isolate display-language fixtures from the developer machine's browser locale.
+    Object.defineProperty(navigator, 'language', { value: document.documentElement.lang });
     const attach = HTMLElement.prototype.attachShadow;
     let shadow;
     HTMLElement.prototype.attachShadow = function(options) {
@@ -48,12 +61,18 @@ function fixture({ width, zoom, reset }) {
       const footer = rect(document.querySelector('footer'));
       const sidebar = rect(document.querySelector('aside'));
       const reset = rect([...shadow.querySelectorAll('.quota-reset')].at(-1));
-      return { gap:(footer.top-card.bottom)/${zoom}, margin:getComputedStyle(host).marginBottom,
+      const lowerEdge = ${modern} ? sidebar.bottom : footer.top;
+      return { gap:(lowerEdge-card.bottom)/${zoom}, margin:getComputedStyle(host).marginBottom,
         fits:card.top>=sidebar.top && card.left>=sidebar.left && card.right<=sidebar.right,
-        resetVisible:reset.bottom<=footer.top && reset.width>0,
+        resetVisible:reset.bottom<=lowerEdge && reset.width>0,
+        railClear:${modern} ? card.left>=footer.right : true,
+        resetFits:reset.width<=card.width && shadow.querySelector('.quota-reset').scrollWidth<=shadow.querySelector('.quota-reset').clientWidth,
+        foreground:getComputedStyle(shadow.querySelector('.quota-title')).color,
+        resetFont:getComputedStyle(shadow.querySelector('.quota-reset')).fontSize,
         scrollable:document.querySelector('[data-app-action-sidebar-scroll]').clientHeight>0,
         visible:api.status().mounted };
     }
+    if (${stale}) snapshot.fetchedAtMs -= 200000;
     api.update(snapshot);
     const initial = measure();
     api.update(snapshot);
@@ -85,6 +104,11 @@ test("quota layout survives outer CSS reset, resizing and refresh without coveri
       { name: "zoomed", width: 240, zoom: 1.5, reset: true },
       { name: "zoom200", width: 200, zoom: 2, reset: true },
       { name: "no-reset", width: 280, zoom: 1, reset: false },
+      { name: "content-panel", width: 280, zoom: 1, reset: true, modern: true },
+      { name: "content-panel-narrow", width: 200, zoom: 1, reset: true, modern: true },
+      { name: "content-panel-zoom200-dark", width: 200, zoom: 2, reset: true, modern: true, dark: true },
+      { name: "content-panel-dark", width: 280, zoom: 1, reset: true, modern: true, dark: true },
+      { name: "content-panel-english-narrow", width: 200, zoom: 1, reset: true, modern: true, language: "en", stale: true },
     ]) {
       const html = path.join(temporary, `${scenario.name}.html`);
       await writeFile(html, fixture(scenario));
@@ -100,10 +124,19 @@ test("quota layout survives outer CSS reset, resizing and refresh without coveri
       assert.ok(result, `${scenario.name}: browser must return layout measurements`);
       for (const phase of ["initial", "refreshed", "restored"]) {
         assert.ok(result[phase].gap >= 7.5, `${scenario.name}/${phase}: ${JSON.stringify(result[phase])}`);
+        if (scenario.modern) {
+          assert.ok(Math.abs(result[phase].gap - 12) < 0.5,
+            `${scenario.name}/${phase}: remove obsolete footer reservation`);
+          assert.equal(result[phase].foreground, scenario.dark ? "rgb(237, 237, 237)" : "rgb(32, 32, 32)",
+            "use native foreground token rather than independent colors");
+        }
         assert.equal(result[phase].fits, true);
         assert.equal(result[phase].resetVisible, true);
         assert.equal(result[phase].scrollable, true);
         assert.equal(result[phase].visible, true);
+        assert.equal(result[phase].railClear, true);
+        assert.equal(result[phase].resetFits, true, `${scenario.name}/${phase}: reset text must fit without truncation`);
+        assert.equal(result[phase].resetFont, "11px");
       }
       assert.equal(result.hiddenInSettings, true, "Settings must hide the card in actual layout");
       assert.equal(result.clean, true, "cleanup must restore unchanged native elements");

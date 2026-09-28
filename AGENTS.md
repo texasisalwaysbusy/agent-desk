@@ -41,7 +41,7 @@ After any code change, run the relevant focused test first, then `npm run check`
 
 - Keep exactly one official Codex installation and the existing default login profile.
 - Resolve the Store package dynamically and validate package identity plus Authenticode signatures for `ChatGPT.exe` and `codex.exe`.
-- Use inherited `--remote-debugging-pipe` only. Never introduce a debugging TCP port, `--user-data-dir`, a copied profile, browser/CDP HTTP bridge, or a second login profile.
+- On the user's 2026-09-28 request to complete the formal launcher, Windows uses registered Store activation with a random `127.0.0.1` CDP listener. Verify package identity/signatures and listener PID ownership before discovery and connection; never attach to an already running ordinary Codex. This listener is reachable by same-machine processes and must be documented, not described as private or authenticated. Keep inherited `--remote-debugging-pipe` only as an explicit legacy diagnostic option; do not silently retry or switch transports. Never use `--user-data-dir`, a copied profile, a LAN listener, a browser/CDP proxy, or a second login profile.
 - Never read, copy, back up, expose, or log Cookies, Login Data, tokens, authentication databases, browser profiles, or Codex session databases.
 - Do not modify `WindowsApps`, `app.asar`, the Codex package, Codex configuration, the user global `.codex`, `.hermes`, or browser profiles.
 - If ordinary Codex is already running, only prompt the user to exit normally and restart through the tray. Do not terminate or attach to it.

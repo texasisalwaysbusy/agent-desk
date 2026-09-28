@@ -3,8 +3,12 @@
 Agent Desk has a React/TypeScript frontend, local Node service, Windows Tauri
 launcher, and a thin stdio plugin. All UI assets are local. The launcher validates
 the installed official Codex package and a renderer capability contract before
-loading the bundled interface through an inherited debugging pipe. It does not
-modify the Codex package, use a debugging TCP port, or copy an authentication profile.
+loading the bundled interface. The Windows launcher candidate uses registered
+Store activation with a random `127.0.0.1` CDP listener, verified against the
+activated process PID. Other same-machine processes can reach this listener;
+the separate API authentication does not protect CDP. It does not modify the
+Codex package or copy an authentication profile. Unknown renderer structures
+fail closed; minor version numbers are not an unconditional support promise.
 
 The HTTP service binds only to a random 127.0.0.1 port with instance authentication,
 Origin/Host validation and launcher challenge. Persistent data, logs and the runtime

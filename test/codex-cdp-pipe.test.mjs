@@ -45,7 +45,9 @@ test("the private browser transport exchanges NUL-delimited CDP messages over in
     }
   });
 
-  await browser.open();
+  const stages = [];
+  await browser.open((stage) => stages.push(stage));
+  assert.deepEqual(stages, ["browser-version", "target-discovery"]);
   assert.deepEqual(
     requests.map((request) => request.method),
     ["Browser.getVersion", "Target.setDiscoverTargets"],

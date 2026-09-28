@@ -9,15 +9,20 @@ const source = await readFile(
   "utf8",
 );
 
-function fixture({ onQuotaShadow } = {}) {
-  const dom = new JSDOM(`<!doctype html><html lang="zh-CN"><body>
-    <aside class="app-shell-left-panel">
-      <div class="sidebar-layout">
-        <div data-app-action-sidebar-scroll></div>
-        <button aria-label="个人资料">用户</button>
-      </div>
-    </aside>
-  </body></html>`, {
+function fixture({ onQuotaShadow, modern = false } = {}) {
+  const sidebar = modern
+    ? `<aside data-app-shell-left-panel-appearance="content-surface">
+        <nav role="navigation" aria-label="App navigation">
+          <div class="min-h-0 flex-1 overflow-y-auto"><button class="sidebar-item">Projects</button></div>
+        </nav>
+      </aside>`
+    : `<aside class="app-shell-left-panel">
+        <div class="sidebar-layout">
+          <div data-app-action-sidebar-scroll></div>
+          <button aria-label="个人资料">用户</button>
+        </div>
+      </aside>`;
+  const dom = new JSDOM(`<!doctype html><html lang="zh-CN"><body>${sidebar}</body></html>`, {
     pretendToBeVisual: true,
     runScripts: "outside-only",
     url: "app://codex/",
@@ -52,6 +57,62 @@ test("embedded quota card mounts after the native conversation scroller with a c
   assert.equal(dom.window.__codexTaskboardQuotaDisplay__.status().mounted, true);
   dom.window.__codexTaskboardQuotaDisplay__.cleanup();
   dom.window.close();
+});
+
+test("updated Codex sidebar places the quota card inside the validated navigation flow", () => {
+  const dom = fixture({ modern: true });
+  try {
+    const host = dom.window.document.getElementById("codex-taskboard-quota-display");
+    const scroller = dom.window.document.querySelector("nav div.overflow-y-auto");
+    assert.equal(scroller.nextElementSibling, host);
+    assert.equal(host.hidden, false);
+    assert.equal(host.shadowRoot, null);
+  } finally {
+    dom.window.__codexTaskboardQuotaDisplay__.cleanup();
+    dom.window.close();
+  }
+});
+
+test("quota card parks while two sidebars are visible and returns when one remains", async () => {
+  const dom = fixture({ modern: true });
+  try {
+    const document = dom.window.document;
+    const host = document.getElementById("codex-taskboard-quota-display");
+    const duplicate = document.querySelector("aside").cloneNode(true);
+    document.body.append(duplicate);
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+    assert.equal(host.hidden, true);
+    duplicate.remove();
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+    assert.equal(host.hidden, false);
+  } finally {
+    dom.window.__codexTaskboardQuotaDisplay__.cleanup();
+    dom.window.close();
+  }
+});
+
+test("content-panel spacing changes only the owned card and falls back for an embedded footer", () => {
+  const dom = fixture({ modern: true });
+  try {
+    const document = dom.window.document;
+    const api = dom.window.__codexTaskboardQuotaDisplay__;
+    const sidebar = document.querySelector("aside");
+    const host = document.getElementById("codex-taskboard-quota-display");
+    assert.equal(host.getAttribute("data-codex-taskboard-quota-layout"), "content-panel");
+    const footer = document.createElement("footer");
+    sidebar.append(footer);
+    api.heartbeat();
+    assert.equal(host.getAttribute("data-codex-taskboard-quota-layout"), "legacy");
+    footer.remove();
+    api.heartbeat();
+    assert.equal(host.getAttribute("data-codex-taskboard-quota-layout"), "content-panel");
+    assert.equal(sidebar.getAttribute("style"), null);
+    api.cleanup();
+    assert.equal(sidebar.querySelectorAll("[data-codex-taskboard-quota-layout]").length, 0);
+  } finally {
+    dom.window.__codexTaskboardQuotaDisplay__.cleanup();
+    dom.window.close();
+  }
 });
 
 test("quota card reserves footer clearance on its own host through refresh and cleanup", () => {
@@ -124,6 +185,34 @@ test("embedded quota card accepts only a normalized snapshot and survives sideba
   assert.equal(api.status().mounted, true);
   api.cleanup();
   dom.window.close();
+});
+
+test("a cleaned quota card remounts when the same source is injected again", () => {
+  const dom = fixture({ modern: true });
+  try {
+    const original = dom.window.__codexTaskboardQuotaDisplay__;
+    original.update({
+      schemaVersion: 1,
+      fetchedAtMs: Date.now(),
+      buckets: [{ id: "codex", windows: [
+        { kind: "primary", remainingPercent: 47, durationMinutes: 300 },
+      ] }],
+    });
+    original.cleanup();
+    assert.equal(original.status().cleaned, true);
+    assert.equal(dom.window.document.getElementById("codex-taskboard-quota-display"), null);
+
+    dom.window.eval(source);
+    const restored = dom.window.__codexTaskboardQuotaDisplay__;
+    assert.equal(restored, original);
+    assert.equal(restored.status().cleaned, false);
+    assert.equal(restored.status().mounted, true);
+    assert.equal(restored.status().freshness, "fresh");
+    assert.equal(dom.window.document.querySelectorAll("#codex-taskboard-quota-display").length, 1);
+  } finally {
+    dom.window.__codexTaskboardQuotaDisplay__.cleanup();
+    dom.window.close();
+  }
 });
 
 test("embedded quota card parks in Settings and exposes no remote UI dependencies", async () => {

@@ -28,6 +28,11 @@ and public-facing documentation before creating a clean public repository.
 ## Release gates
 
 - Source checks and the Windows package must pass, with skipped checks reported.
+- Public stable packages must use a stable product version and the Release build
+  profile, with the GitHub release neither draft nor prerelease. Keep sanitized
+  startup/error logs; do not change accepted runtime behavior just to remove logs.
+  A user-retained local rc installation must not be overwritten as a publication
+  side effect.
 - Verify the new installer and icon in the actual host; source tests do not replace this.
 - Test clean installation and legacy-store reuse without running both launchers.
 - Verify core tasks, conversation navigation, dashboard and failure states.
@@ -38,6 +43,12 @@ and public-facing documentation before creating a clean public repository.
 - Include LICENSE, NOTICE, licenses/Apache-2.0.txt and docs/licensing.md; describe covered Agent Desk changes as source-available with Commons Clause 1.0, never Apache-only.
 - Discard earlier Apache-only source snapshots as publication inputs; never push their commits or binaries as this licensed release.
 - Upload only after confirming the destination owner, repository name and visibility.
+
+For 1.2.2, the installed rc.6 acceptance covers the same runtime implementation;
+stable promotion changes product version metadata and public documentation only.
+Rebuild and verify the stable installer payload and packaged service. Do not repeat
+accepted host flows without a new change or failure; keep the observed and unknown
+items explicit in the release notes.
 
 Repository initialization and upload are deliberately separate from source preparation.
 The local development checkout keeps upstream history for audit; it is not the public

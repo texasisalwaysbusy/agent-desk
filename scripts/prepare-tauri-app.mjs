@@ -257,6 +257,10 @@ async function copyApplicationResources() {
     "codex-model-catalog.mjs",
     "handoff-approval.mjs",
     "codex-renderer-compatibility.mjs",
+    "codex-cdp-loopback-candidate.mjs",
+    "codex-registered-activation.ps1",
+    "codex-renderer-rejections.mjs",
+    "codex-sidebar-diagnostic.mjs",
     "taskboard-supervisor.mjs",
   ]) {
     await copyFile(

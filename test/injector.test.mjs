@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import vm from "node:vm";
@@ -10,6 +11,16 @@ import {
   probeRendererContract,
   rendererContractProbeExpression,
 } from "../scripts/codex-renderer-compatibility.mjs";
+import { managedCodexExitAction } from "../shared/codex-startup-state.mjs";
+import { normalizeSidebarDiagnostic, sidebarDiagnosticExpression } from "../scripts/codex-sidebar-diagnostic.mjs";
+
+test("a managed Codex exit cannot restart before the workbench was injected", () => {
+  assert.equal(managedCodexExitAction(0, false), "stop");
+  assert.equal(managedCodexExitAction(1, false), "stop");
+  assert.equal(managedCodexExitAction(null, false), "stop");
+  assert.equal(managedCodexExitAction(0, true), "idle");
+  assert.equal(managedCodexExitAction(1, true), "stop");
+});
 
 const source = await readFile(new URL("../scripts/codex-injector.mjs", import.meta.url), "utf8");
 const runtimeSource = await readFile(
@@ -426,6 +437,40 @@ test("the package injection command uses only the private pipe launcher", () => 
   assert.match(source, /openControl\.on\("close", \(\) => requestStop\(\{ preserveCodex: true \}\)\)/);
 });
 
+test("noninteractive candidate stdin cannot stop startup, while managed stdin close still detaches", () => {
+  const start = source.indexOf("  if (options.watch) {", source.indexOf("const requestSignalStop ="));
+  const end = source.indexOf("\n  try {", start);
+  assert.ok(start >= 0 && end > start);
+  const setup = source.slice(start, end);
+  const signals = [];
+  const candidate = {
+    options: { watch: true, windowsLoopbackCandidate: true },
+    openControl: null,
+    createInterface: () => { throw new Error("candidate must not bind stdin"); },
+    process: { stdin: {}, once: (signal) => signals.push(signal) },
+    requestSignalStop: () => {},
+    requestStop: () => { throw new Error("candidate must not stop on stdin EOF"); },
+    queueTaskboardOpen: () => {},
+    console: { log: () => {} },
+  };
+  vm.runInNewContext(setup, candidate);
+  assert.equal(candidate.openControl, null);
+  assert.deepEqual(signals, ["SIGINT", "SIGTERM"]);
+
+  const control = new EventEmitter();
+  const stops = [];
+  const managed = {
+    ...candidate,
+    options: { watch: true, windowsLoopbackCandidate: false },
+    createInterface: () => control,
+    requestStop: (value) => stops.push(value),
+  };
+  vm.runInNewContext(setup, managed);
+  control.emit("close");
+  assert.equal(stops.length, 1);
+  assert.equal(stops[0].preserveCodex, true);
+});
+
 test("attach reconciles the renderer against a hashed current injection source", () => {
   assert.match(source, /createHash\("sha256"\)/);
   assert.match(source, /__CODEX_TASKBOARD_SOURCE_HASH__/);
@@ -451,4 +496,225 @@ test("the injected iframe follows the configured local service port", () => {
   assert.match(source, /const taskboardBaseUrl = `\$\{taskboardOrigin\}\/\$\{encodeURIComponent\(taskboardInstanceToken\)\}`/);
   assert.match(source, /const taskboardPageUrl = `\$\{taskboardBaseUrl\}\/\?host=codex`/);
   assert.match(source, /window\.__CODEX_TASKBOARD_URL__ = \$\{JSON\.stringify\(taskboardPageUrl\)\}/);
+});
+
+function failureReporter(candidate, logs) {
+  const helpers = source.slice(
+    source.indexOf("function injectionReadinessSummary"),
+    source.indexOf("async function evaluateInjectionSource"),
+  );
+  const frameFinder = source.slice(
+    source.indexOf("function findFrameByName"),
+    source.indexOf("async function verifiedTaskboardDocument"),
+  );
+  return vm.runInNewContext(`${frameFinder}\n${helpers}\nreportCandidateInjectionFailure`, {
+    process: { env: { AGENT_DESK_LOOPBACK_CANDIDATE: candidate ? "1" : "0" } },
+    probeRendererContract,
+    quotaDisplaySnapshot: null,
+    normalizeSidebarDiagnostic,
+    sidebarDiagnosticExpression,
+    console: { error: (line) => logs.push(JSON.parse(line)) },
+  });
+}
+
+test("frame failure structure probes stay outside the production path", async () => {
+  const logs = [];
+  const report = failureReporter(false, logs);
+  await report({ send: () => { throw new Error("must not inspect a live document"); } },
+    { sourceHash: "expected", frameUrl: "about:blank" }, "expected", true);
+  assert.equal(logs.length, 1);
+  assert.equal(logs[0].injectionReadiness.sourceActive, true);
+  assert.equal(logs[0].injectionReadiness.frameLoaded, true);
+  assert.equal(logs[0].injectionReadiness.frameReady, false);
+  assert.ok(Object.values(logs[0].injectionReadiness).every((value) => typeof value === "boolean"));
+});
+
+test("candidate failure distinguishes a lost anchor from an unpopulated owned frame without content logs", async () => {
+  const logs = [];
+  const calls = [];
+  const report = failureReporter(true, logs);
+  const frameName = "codex-taskboard-11111111-2222-3333-4444-555555555555";
+  const cdp = { send: async (method, params) => {
+    calls.push({ method, params });
+    if (method === "Runtime.evaluate" && params.expression === rendererContractProbeExpression) {
+      return { result: { value: { schemaVersion: 1,
+        checks: { appProtocol: true, topFrame: true, sidebar: true, sidebarScroll: true,
+          pageMount: true, referenceButton: false, headerReference: false },
+        capabilities: { fullPanel: true } } } };
+    }
+    if (method === "Runtime.evaluate" && params.expression === sidebarDiagnosticExpression) {
+      return { result: { value: { schemaVersion: 1, visibleAsideCount: 1, asides: [],
+        privateContent: "must never be logged" } } };
+    }
+    if (method === "Runtime.evaluate" && !params.contextId) {
+      return { result: { value: frameName } };
+    }
+    if (method === "Page.getFrameTree") {
+      return { frameTree: { frame: { id: "parent" }, childFrames: [
+        { frame: { id: "owned-child", name: frameName } },
+      ] } };
+    }
+    if (method === "Page.createIsolatedWorld") return { executionContextId: 42 };
+    assert.equal(method, "Runtime.evaluate");
+    assert.equal(params.contextId, 42);
+    assert.doesNotMatch(params.expression, /innerHTML|textContent|outerHTML|\.click\(|setAttribute/);
+    return { result: { value: { documentComplete: true, baseHostCodex: false,
+      modulePresent: false, rootPresent: false, rootPopulated: false,
+      privateContent: "must never be logged" } } };
+  } };
+  await report(cdp, { sourceHash: "expected", frameUrl: "about:blank" }, "expected", true);
+  assert.deepEqual(logs[1].injectionFailureShape, {
+    anchorProbeAvailable: true, childProbeAvailable: true, anchorCompatible: false,
+    quotaReadAttempted: false, quotaSnapshotAvailable: false,
+    quotaAccountReadComplete: false, quotaRateLimitsReadComplete: false, quotaNormalized: false,
+    headerReference: false, sidebar: true, sidebarScroll: true, pageMount: true,
+    childFrameMatched: true, documentComplete: true, baseHostCodex: false,
+    modulePresent: false, rootPresent: false, rootPopulated: false,
+  });
+  assert.equal(calls.find((call) => call.method === "Page.createIsolatedWorld").params.frameId,
+    "owned-child");
+  assert.ok(Object.values(logs[1].injectionFailureShape).every((value) => typeof value === "boolean"));
+  assert.doesNotMatch(JSON.stringify(logs), /must never|owned-child|11111111|about:blank/);
+  assert.equal(logs[2].injectionSidebarShape.visibleAsideCount, 1);
+});
+
+test("candidate failure cannot inspect an unnamed or unrelated child frame", async () => {
+  const logs = [];
+  const report = failureReporter(true, logs);
+  const methods = [];
+  await report({ send: async (method, params) => {
+    methods.push(method);
+    assert.equal(method, "Runtime.evaluate");
+    return params.expression === rendererContractProbeExpression
+      ? { exceptionDetails: {} } : { result: { value: "unrelated-frame" } };
+  } }, {}, "expected", false);
+  assert.deepEqual(methods, ["Runtime.evaluate", "Runtime.evaluate"]);
+  assert.deepEqual(logs[1].injectionFailureShape,
+    { anchorProbeAvailable: false, childProbeAvailable: false,
+      quotaReadAttempted: false, quotaSnapshotAvailable: false,
+      quotaAccountReadComplete: false, quotaRateLimitsReadComplete: false, quotaNormalized: false });
+});
+
+test("startup waits keep the authenticated host heartbeat alive until the frame is ready", async () => {
+  const waitSource = source.slice(source.indexOf("async function waitForInjectionStatus("),
+    source.indexOf("function injectionReadinessSummary("));
+  let now = 1000;
+  const heartbeats = [];
+  const wait = vm.runInNewContext(`(${waitSource})`, {
+    Date: { now: () => now },
+    setTimeout: (callback, delay) => { now += delay; queueMicrotask(callback); },
+    readInjectionStatus: async () => ({ sourceHash: "expected", entryMounted: now >= 11000,
+      pageVisible: true, frameUrl: "about:blank", frameReady: now >= 16000 }),
+  });
+  const status = await wait({}, true, "expected", 20000, {
+    heartbeat: async () => { heartbeats.push(now); },
+  });
+  assert.equal(status.frameReady, true);
+  assert.ok(heartbeats.length >= 7);
+  assert.ok(heartbeats.every((at, index) => index === 0 || at - heartbeats[index - 1] <= 2250));
+  assert.ok(now - heartbeats.at(-1) < 8000);
+});
+
+function startupHarness({ compatible = true, entryMounted = true } = {}) {
+  const events = [];
+  const hostBridge = {
+    install: async () => { events.push("install-host"); },
+    publishHeartbeat: async () => { events.push("heartbeat"); },
+  };
+  const cdp = {
+    on() {},
+    send: async (method, params) => {
+      events.push(method === "Runtime.evaluate" && params.expression.includes("taskboard?.open")
+        ? "open" : method);
+      return { result: { value: null } };
+    },
+  };
+  const targetSource = source.slice(source.indexOf("async function injectTarget("),
+    source.indexOf("async function injectAll("));
+  const run = vm.runInNewContext(`(${targetSource})`, {
+    logLaunchDiagnostic() {},
+    probeRendererContract: async () => ({ compatible, capabilities: {
+      fullPanel: compatible, quotaDisplay: compatible, taskNavigation: compatible,
+    } }),
+    currentInjectionSource: async () => ({ source: "fixture", sourceHash: "expected" }),
+    installTaskboardHostBinding: () => hostBridge,
+    registerInjectionSource: async () => "registration",
+    evaluateInjectionSource: async () => { events.push("source"); },
+    publishInjectionScriptIdentifier: async () => {},
+    refreshCodexQuotaDisplay: async ([connection]) => {
+      assert.equal(connection, cdp);
+      connection.taskboardQuotaReadAttempted = true;
+      events.push("quota-read");
+    },
+    publishCodexQuotaDisplay: async () => { events.push("quota-publish"); },
+    waitForInjectionStatus: async () => {
+      events.push("wait");
+      return { sourceHash: "expected", entryMounted, pageVisible: true,
+        frameUrl: "about:blank", frameReady: true,
+        quotaDisplay: { mounted: true, freshness: "fresh" } };
+    },
+    waitForFrame: async () => true,
+    reportCandidateInjectionFailure: async () => { events.push("failure-summary"); },
+    detachInjection: async () => { events.push("cleanup"); },
+    setTimeout: (callback) => queueMicrotask(callback),
+  });
+  return { events, cdp, run: () => run({ connect: async () => cdp }, {}, true, null,
+    true, {}, false, "startup", { mode: "contract-probe" }) };
+}
+
+test("validated startup reads quota before iframe readiness and renews heartbeat before opening", async () => {
+  const harness = startupHarness();
+  const result = await harness.run();
+  assert.equal(result.result.injected, true);
+  assert.equal(result.result.quotaReadAttempted, true);
+  assert.equal(result.result.quotaDisplay.freshness, "fresh");
+  assert.ok(harness.events.indexOf("quota-read") < harness.events.indexOf("wait"));
+  assert.ok(harness.events.indexOf("quota-read") < harness.events.indexOf("open"));
+  assert.equal(harness.events[harness.events.indexOf("open") - 1], "heartbeat");
+  assert.equal(harness.events.includes("cleanup"), false);
+});
+
+test("missing entry stops before opening a blank frame; failed contracts never read quota", async () => {
+  const missing = startupHarness({ entryMounted: false });
+  await assert.rejects(missing.run(), /sidebar entry did not mount/);
+  assert.equal(missing.events.includes("open"), false);
+  assert.deepEqual(missing.events.slice(-2), ["failure-summary", "cleanup"]);
+  const rejected = startupHarness({ compatible: false });
+  rejected.cdp.close = () => { rejected.events.push("close"); };
+  assert.equal((await rejected.run()).result.injected, false);
+  assert.equal(rejected.events.includes("quota-read"), false);
+  assert.equal(rejected.events.includes("Page.setBypassCSP"), false);
+});
+
+test("quota stage metadata distinguishes native read failures without retaining account responses", async () => {
+  const quotaSource = source.slice(source.indexOf("async function readCodexQuotaSnapshotForDisplay("),
+    source.indexOf("async function publishCodexQuotaDisplay("));
+  const account = { account: { type: "chatgpt", privateField: "must-not-retain" } };
+  const response = { privateField: "must-not-retain" };
+  for (const failedStage of ["account", "rate-limits", "normalize", null]) {
+    const read = vm.runInNewContext(`(${quotaSource})`, {
+      Date,
+      requestCodexAppServerViaCdp: async (_cdp, _context, _host, method) => {
+        if (method === "account/read") {
+          if (failedStage === "account") throw new Error("synthetic account failure");
+          return account;
+        }
+        if (failedStage === "rate-limits") throw new Error("synthetic rate failure");
+        return response;
+      },
+      normalizeCodexRateLimitsForDisplay: () => {
+        if (failedStage === "normalize") throw new Error("synthetic schema failure");
+        return { schemaVersion: 1, buckets: [] };
+      },
+    });
+    const cdp = {};
+    if (failedStage) await assert.rejects(read(cdp), /synthetic/);
+    else await read(cdp);
+    assert.deepEqual(JSON.parse(JSON.stringify(cdp.taskboardQuotaReadState)), {
+      accountReadComplete: failedStage !== "account",
+      rateLimitsReadComplete: failedStage === "normalize" || failedStage === null,
+      normalized: failedStage === null,
+    });
+    assert.doesNotMatch(JSON.stringify(cdp), /must-not-retain|privateField|chatgpt/);
+  }
 });

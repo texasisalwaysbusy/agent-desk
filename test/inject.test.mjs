@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import vm from "node:vm";
+import { JSDOM } from "jsdom";
 
 import { parseTaskboardAutomationHostRequest } from "../shared/taskboard-automation.mjs";
 
@@ -35,11 +36,11 @@ test("embedded page uses the launcher URL inside an opaque sandbox", () => {
   assert.doesNotMatch(source, /allow-same-origin/);
 });
 
-test("entry clones the native Plugins row and the page covers the complete Codex workspace", () => {
+test("entry follows the native sidebar row and the page covers the complete Codex workspace", () => {
   assert.match(source, /const PLUGIN_LABELS = \["插件", "plugins"\]/);
   assert.match(source, /if \(plugin\?\.parentElement\) return plugin;/);
   assert.match(source, /return directButtons\.length >= 3/);
-  assert.match(source, /const button = reference\.cloneNode\(true\)/);
+  assert.match(source, /: reference\.cloneNode\(true\)/);
   assert.match(source, /reference\.after\(entry\)/);
   assert.match(source, /document\.querySelector\("\.app-shell-main-content-frame"\)/);
   assert.match(source, /const surface = viewport\?\.parentElement/);
@@ -453,4 +454,135 @@ test("host integration stays thin", () => {
   assert.doesNotMatch(source, /__codexSessionDeleteBridge/);
   assert.doesNotMatch(source, /import\s*\(/);
   assert.doesNotMatch(source, /window\.fetch\s*=/);
+});
+
+test("the Agent Desk sidebar entry remounts after Codex replaces its navigation", async () => {
+  const navigation = () => `<aside><nav role="navigation" aria-label="App navigation">
+    <div data-app-action-sidebar-scroll><button>Plugins</button></div>
+  </nav></aside>`;
+  const dom = new JSDOM(`<!doctype html><html lang="en"><body>${navigation()}</body></html>`, {
+    pretendToBeVisual: true,
+    runScripts: "outside-only",
+    url: "app://codex/",
+  });
+  dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({
+    width: 260, height: 700, top: 0, left: 0, right: 260, bottom: 700,
+  });
+  try {
+    dom.window.__CODEX_TASKBOARD_SOURCE_HASH__ = "remount-test";
+    dom.window.eval(source);
+    const document = dom.window.document;
+    const firstEntry = document.getElementById("codex-taskboard-entry");
+    assert.ok(firstEntry);
+    assert.equal(firstEntry.previousElementSibling.textContent, "Plugins");
+
+    document.querySelector("aside").outerHTML = navigation();
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 210));
+    const remounted = document.getElementById("codex-taskboard-entry");
+    assert.equal(remounted, firstEntry);
+    assert.equal(remounted.previousElementSibling.textContent, "Plugins");
+    assert.equal(document.querySelectorAll("#codex-taskboard-entry").length, 1);
+
+    dom.window.eval(source);
+    assert.equal(document.querySelectorAll("#codex-taskboard-entry").length, 1);
+    dom.window.__codexTaskboardInjection__.destroy();
+    assert.equal(document.getElementById("codex-taskboard-entry"), null);
+  } finally {
+    dom.window.__codexTaskboardInjection__?.destroy();
+    dom.window.close();
+  }
+});
+
+test("the entry remounts in the newer left-rail layout without a thread scroller", async () => {
+  const navigation = () => `<aside data-app-shell-left-panel-appearance="content-surface">
+    <nav role="navigation" aria-label="App navigation">
+      <div class="overflow-y-auto"><button class="sidebar-item">Plugins</button></div>
+    </nav>
+  </aside>`;
+  const dom = new JSDOM(`<!doctype html><html lang="en"><body>${navigation()}</body></html>`, {
+    pretendToBeVisual: true,
+    runScripts: "outside-only",
+    url: "app://codex/",
+  });
+  dom.window.HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+    return this.matches?.("aside")
+      ? { width: 260, height: 700, top: 0, left: 0, right: 260, bottom: 700 }
+      : { width: 200, height: 30, top: 0, left: 0, right: 200, bottom: 30 };
+  };
+  try {
+    dom.window.__CODEX_TASKBOARD_SOURCE_HASH__ = "modern-remount-test";
+    dom.window.eval(source);
+    const document = dom.window.document;
+    const entry = document.getElementById("codex-taskboard-entry");
+    assert.ok(entry);
+    document.querySelector("aside").outerHTML = navigation();
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 210));
+    assert.equal(document.getElementById("codex-taskboard-entry"), entry);
+    assert.equal(entry.previousElementSibling.textContent, "Plugins");
+    assert.equal(document.querySelectorAll("#codex-taskboard-entry").length, 1);
+  } finally {
+    dom.window.__codexTaskboardInjection__?.destroy();
+    dom.window.close();
+  }
+});
+
+test("a native navigation link produces a button entry without inheriting its destination", () => {
+  const dom = new JSDOM(`<!doctype html><html lang="en"><body>
+    <aside data-app-shell-left-panel-appearance="content-surface">
+      <nav role="navigation" aria-label="App navigation">
+        <div class="overflow-y-auto"><a class="sidebar-item" href="/projects"><span>Projects</span></a></div>
+      </nav>
+    </aside>
+  </body></html>`, { runScripts: "outside-only", url: "app://codex/" });
+  dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({
+    width: 260, height: 700, top: 0, left: 0, right: 260, bottom: 700,
+  });
+  try {
+    dom.window.__CODEX_TASKBOARD_SOURCE_HASH__ = "link-entry-test";
+    dom.window.eval(source);
+    const entry = dom.window.document.getElementById("codex-taskboard-entry");
+    assert.equal(entry?.tagName, "BUTTON");
+    assert.equal(entry.hasAttribute("href"), false);
+    assert.equal(entry.previousElementSibling?.tagName, "A");
+    assert.equal(entry.previousElementSibling?.getAttribute("href"), "/projects");
+  } finally {
+    dom.window.__codexTaskboardInjection__?.destroy();
+    dom.window.close();
+  }
+});
+
+test("fixed-header entry remounts beside its unique native row without duplication", async () => {
+  const navigation = () => `<aside data-app-shell-left-panel-appearance="content-surface">
+    <nav role="navigation" aria-label="App navigation">
+      <div><button class="sidebar-item group"><span>New task</span></button></div>
+      <div><div class="overflow-y-auto" data-app-action-sidebar-scroll>
+        <div role="button" tabindex="0" class="sidebar-item group"
+          data-app-action-sidebar-project-row>Project</div>
+      </div></div>
+    </nav>
+  </aside>`;
+  const dom = new JSDOM(`<!doctype html><html lang="en"><body>${navigation()}</body></html>`, {
+    pretendToBeVisual: true, runScripts: "outside-only", url: "app://codex/",
+  });
+  dom.window.HTMLElement.prototype.getBoundingClientRect = () => ({
+    width: 260, height: 700, top: 0, left: 0, right: 260, bottom: 700,
+  });
+  try {
+    dom.window.__CODEX_TASKBOARD_SOURCE_HASH__ = "fixed-header-remount-test";
+    dom.window.eval(source);
+    const { document } = dom.window;
+    const entry = document.getElementById("codex-taskboard-entry");
+    assert.ok(entry);
+    assert.equal(entry.previousElementSibling.textContent, "New task");
+    assert.equal(entry.closest("[data-app-action-sidebar-scroll]"), null);
+    assert.equal(document.querySelectorAll("#codex-taskboard-entry").length, 1);
+    document.querySelector("aside").outerHTML = navigation();
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 210));
+    assert.equal(document.getElementById("codex-taskboard-entry"), entry);
+    assert.equal(entry.previousElementSibling.textContent, "New task");
+    assert.equal(document.querySelectorAll("#codex-taskboard-entry").length, 1);
+  } finally {
+    dom.window.__codexTaskboardInjection__?.destroy();
+    dom.window.close();
+  }
 });

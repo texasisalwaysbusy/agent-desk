@@ -2,6 +2,7 @@
 
 import { spawn } from "node:child_process";
 import { createHash, createHmac, randomBytes, randomUUID } from "node:crypto";
+import { appendFileSync, mkdirSync } from "node:fs";
 import { chmod, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { createInterface } from "node:readline";
@@ -11,6 +12,7 @@ import path from "node:path";
 import { resolvePort } from "../server/app.mjs";
 import { resolveCodexExecutable } from "../shared/codex-executable.mjs";
 import { withoutTaskboardLauncherEnvironment } from "../shared/codex-environment.mjs";
+import { managedCodexExitAction } from "../shared/codex-startup-state.mjs";
 import {
   parseTaskboardAutomationHostRequest,
   reconcileTaskboardAutomation,
@@ -32,6 +34,17 @@ import {
 } from "./codex-renderer-compatibility.mjs";
 import { createTaskboardSupervisor } from "./taskboard-supervisor.mjs";
 import { CdpPipeBrowser } from "./codex-cdp-pipe.mjs";
+import { RendererRejectionCache } from "./codex-renderer-rejections.mjs";
+import {
+  normalizeSidebarDiagnostic,
+  sidebarDiagnosticExpression,
+} from "./codex-sidebar-diagnostic.mjs";
+import {
+  activateRegisteredCodex,
+  createLoopbackCandidateRuntime,
+  reserveLoopbackPort,
+  watchRegisteredProcess,
+} from "./codex-cdp-loopback-candidate.mjs";
 import { readNativeModelCatalog } from "./codex-model-catalog.mjs";
 import { createApprovalAdapter } from "./handoff-approval.mjs";
 
@@ -42,6 +55,9 @@ const quotaDisplayPath = path.join(projectRoot, "inject", "codex-quota-display.u
 const taskboardDataDirectory = process.env.CODEX_TASKBOARD_DATA_DIR
   ? path.resolve(process.env.CODEX_TASKBOARD_DATA_DIR)
   : path.join(projectRoot, ".data");
+const startupDiagnosticPath = process.env.CODEX_TASKBOARD_DATA_DIR
+  ? path.join(path.dirname(taskboardDataDirectory), "logs", "agent-desk-startup.jsonl")
+  : null;
 const taskboardRuntimeFile = process.env.CODEX_TASKBOARD_RUNTIME_FILE
   ? path.resolve(process.env.CODEX_TASKBOARD_RUNTIME_FILE)
   : path.join(taskboardDataDirectory, "launcher-runtime.json");
@@ -71,10 +87,84 @@ process.env.CODEX_TASKBOARD_INSTANCE_SECRET = taskboardInstanceSecret;
 const taskboardVersion = process.env.CODEX_TASKBOARD_VERSION?.trim() || "development";
 process.env.CODEX_TASKBOARD_VERSION = taskboardVersion;
 const codexPackageVersion = process.env.CODEX_TASKBOARD_CODEX_VERSION?.trim() || "unknown";
+const rendererDiscoveryTimeoutMs = 75_000;
+let startupAttemptId = null;
 const codexCompatibility = classifyWindowsCodexCompatibility({
   platform: process.platform,
   version: codexPackageVersion,
 });
+function logLaunchDiagnostic(event, details = {}) {
+  if (![
+    "spawn-started", "spawn-returned", "codex-exited", "cdp-output-ended",
+    "cdp-handshake", "cdp-ready", "renderer-discovery", "renderer-waiting",
+    "renderer-probe-start", "renderer-contract", "renderer-timeout",
+    "injection-result", "startup-failed",
+    "activation-started", "activation-ready",
+  ].includes(event)) return;
+  const line = JSON.stringify({
+    launchDiagnostic: {
+      at: new Date().toISOString(),
+      event,
+      ...(startupAttemptId ? { attemptId: startupAttemptId } : {}),
+      agentDeskVersion: taskboardVersion,
+      codexVersion: codexPackageVersion,
+      ...(Number.isInteger(details.pid) ? { pid: details.pid } : {}),
+      ...(Number.isInteger(details.exitCode) ? { exitCode: details.exitCode } : {}),
+      ...(Number.isInteger(details.elapsedSeconds) && details.elapsedSeconds >= 0 && details.elapsedSeconds <= 120
+        ? { elapsedSeconds: details.elapsedSeconds }
+        : {}),
+      ...Object.fromEntries(["total", "pages", "appPages", "eligible"]
+        .filter((key) => Number.isInteger(details[key]) && details[key] >= 0 && details[key] <= 10_000)
+        .map((key) => [key, details[key]])),
+      ...(typeof details.injected === "boolean" ? { injected: details.injected } : {}),
+      ...(typeof details.frameLoaded === "boolean" ? { frameLoaded: details.frameLoaded } : {}),
+      ...(typeof details.compatible === "boolean" ? { compatible: details.compatible } : {}),
+      ...(details.checks && typeof details.checks === "object" ? {
+        checks: Object.fromEntries([
+          "appProtocol", "topFrame", "sidebarScroll", "sidebar", "pageMount",
+          "referenceButton", "nativeBridge", "legacyScroll", "modernScroll",
+          "legacyReference", "modernButton", "modernLink", "modernReferenceInChosenScroll",
+          "headerReference",
+        ].filter((key) => typeof details.checks[key] === "boolean")
+          .map((key) => [key, details.checks[key]])),
+      } : {}),
+      ...(details.shape && typeof details.shape === "object" ? {
+        shape: {
+          ...(typeof details.shape.sameScroll === "boolean"
+            ? { sameScroll: details.shape.sameScroll } : {}),
+          ...Object.fromEntries([
+            "navigationElements", "navigationButtons", "navigationLinks", "navigationRoleButtons",
+            "scrollButtons", "scrollLinks", "scrollRoleButtons", "scrollSidebarItems",
+            "scrollElements", "scrollDirectChildren",
+          ].filter((key) => Number.isInteger(details.shape[key])
+            && details.shape[key] >= 0 && details.shape[key] <= 1000)
+            .map((key) => [key, details.shape[key]])),
+        },
+      } : {}),
+      ...(typeof details.reason === "string" && [
+        "before-injection", "connection-lost", "renderer-contract-mismatch",
+        "invalid-probe-result", "probe-evaluation-failed", "probe-transport-failed",
+      ].includes(details.reason)
+        ? { reason: details.reason }
+        : {}),
+      ...(typeof details.stage === "string" && ["browser-version", "target-discovery"].includes(details.stage)
+        ? { stage: details.stage }
+        : {}),
+      ...(typeof details.signal === "string" && /^SIG[A-Z0-9]{1,24}$/.test(details.signal)
+        ? { signal: details.signal }
+        : {}),
+    },
+  });
+  console.log(line);
+  if (startupDiagnosticPath) {
+    try {
+      mkdirSync(path.dirname(startupDiagnosticPath), { recursive: true, mode: 0o700 });
+      appendFileSync(startupDiagnosticPath, `${line}\n`, { encoding: "utf8", mode: 0o600 });
+    } catch (error) {
+      console.error(`Startup diagnostic write failed (${error.code || "unknown"})`);
+    }
+  }
+}
 const taskboardOrigin = `http://127.0.0.1:${resolvePort()}`;
 const taskboardHealthUrl = `${taskboardOrigin}/health`;
 const taskboardBaseUrl = `${taskboardOrigin}/${encodeURIComponent(taskboardInstanceToken)}`;
@@ -117,6 +207,9 @@ let quotaDisplayFailureCount = 0;
 function parseArgs(argv) {
   const options = {
     cdpPipe: false,
+    windowsLoopbackCandidate: false,
+    windowsRegistered: false,
+    sidebarDiagnosticOnly: false,
     launch: false,
     watch: false,
     open: false,
@@ -129,6 +222,9 @@ function parseArgs(argv) {
     const arg = argv[index];
     if (arg === "--launch") options.launch = true;
     else if (arg === "--cdp-pipe") options.cdpPipe = true;
+    else if (arg === "--windows-loopback-candidate") options.windowsLoopbackCandidate = true;
+    else if (arg === "--windows-registered") options.windowsRegistered = true;
+    else if (arg === "--sidebar-diagnostic-only") options.sidebarDiagnosticOnly = true;
     else if (arg === "--watch") options.watch = true;
     else if (arg === "--open") options.open = true;
     else if (arg === "--startup-token") {
@@ -142,7 +238,20 @@ function parseArgs(argv) {
     else throw new Error(`Unknown option: ${arg}`);
   }
 
-  if (!options.launch || !options.cdpPipe) throw new Error("The hardened launcher requires --launch --cdp-pipe");
+  if (!options.launch || [options.cdpPipe, options.windowsLoopbackCandidate, options.windowsRegistered].filter(Boolean).length !== 1) {
+    throw new Error("Select exactly one Codex transport for --launch");
+  }
+  if (options.windowsLoopbackCandidate &&
+    (process.platform !== "win32" || process.env.AGENT_DESK_LOOPBACK_CANDIDATE !== "1")) {
+    throw new Error("The Windows loopback candidate requires explicit source-test opt-in");
+  }
+  if (options.windowsRegistered && (process.platform !== "win32"
+    || process.env.AGENT_DESK_WINDOWS_TRANSPORT !== "registered-loopback")) {
+    throw new Error("Registered Codex transport must be selected by the Windows launcher");
+  }
+  if (options.sidebarDiagnosticOnly && !options.windowsLoopbackCandidate) {
+    throw new Error("Sidebar diagnostics require the supervised source candidate");
+  }
   if (!options.appPath) throw new Error("--app-path is required");
   return options;
 }
@@ -252,19 +361,29 @@ function codexExecutablePath(appPath) {
 }
 
 async function launchCodexWithPipe(appPath) {
+  startupAttemptId = randomUUID();
+  logLaunchDiagnostic("spawn-started");
   const child = spawn(
     codexExecutablePath(appPath),
     ["--remote-debugging-pipe"],
     {
       env: withoutTaskboardLauncherEnvironment(process.env),
       stdio: ["ignore", "ignore", "ignore", "pipe", "pipe"],
-      windowsHide: process.platform === "win32",
+      windowsHide: false,
     },
   );
+  logLaunchDiagnostic("spawn-returned", { pid: child.pid });
+  child.once("exit", (exitCode, signal) => {
+    logLaunchDiagnostic("codex-exited", { pid: child.pid, exitCode, signal });
+  });
+  child.stdio[4].once("end", () => {
+    logLaunchDiagnostic("cdp-output-ended", { pid: child.pid });
+  });
   const browser = new CdpPipeBrowser(child);
   child.once("error", (error) => browser.fail(error));
   try {
-    await browser.open();
+    await browser.open((stage) => logLaunchDiagnostic("cdp-handshake", { pid: child.pid, stage }));
+    logLaunchDiagnostic("cdp-ready", { pid: child.pid });
     return { child, browser };
   } catch (error) {
     child.kill("SIGTERM");
@@ -282,10 +401,25 @@ function isCodexTarget(target) {
 }
 
 function pipeCdpRuntime(browser) {
+  let previousDiscovery = null;
   return {
-    targets: async () => (await browser.targets())
-      .filter(isCodexTarget)
-      .map((target) => ({ ...target, id: target.targetId })),
+    targets: async () => {
+      const targets = await browser.targets();
+      const eligible = targets.filter(isCodexTarget);
+      const discovery = {
+        total: targets.length,
+        pages: targets.filter((target) => target.type === "page").length,
+        appPages: targets.filter((target) => target.type === "page" && target.url?.startsWith("app://")).length,
+        eligible: eligible.length,
+      };
+      const fingerprint = JSON.stringify(discovery);
+      if (fingerprint !== previousDiscovery) {
+        console.log(JSON.stringify({ rendererDiscovery: discovery }));
+        logLaunchDiagnostic("renderer-discovery", discovery);
+        previousDiscovery = fingerprint;
+      }
+      return eligible.map((target) => ({ ...target, id: target.targetId }));
+    },
     connect: (target) => browser.connect(target.id),
     isHealthy: () => !browser.closed,
     close: () => browser.close(),
@@ -644,6 +778,8 @@ async function readCodexQuotaStatusViaCdp(model, hostId) {
 
 async function readCodexQuotaSnapshotForDisplay(cdp) {
   const checkedAt = Date.now();
+  cdp.taskboardQuotaReadState = { accountReadComplete: false, rateLimitsReadComplete: false,
+    normalized: false };
   const account = await requestCodexAppServerViaCdp(
     cdp,
     undefined,
@@ -653,6 +789,7 @@ async function readCodexQuotaSnapshotForDisplay(cdp) {
     10_000,
     "taskboard_quota_display",
   );
+  cdp.taskboardQuotaReadState.accountReadComplete = true;
   if (account?.account?.type === "apiKey") {
     throw new Error("Codex quota display requires a ChatGPT account");
   }
@@ -668,7 +805,10 @@ async function readCodexQuotaSnapshotForDisplay(cdp) {
     10_000,
     "taskboard_quota_display",
   );
-  return normalizeCodexRateLimitsForDisplay(result, checkedAt);
+  cdp.taskboardQuotaReadState.rateLimitsReadComplete = true;
+  const snapshot = normalizeCodexRateLimitsForDisplay(result, checkedAt);
+  cdp.taskboardQuotaReadState.normalized = true;
+  return snapshot;
 }
 
 async function publishCodexQuotaDisplay(cdp) {
@@ -702,6 +842,7 @@ async function refreshCodexQuotaDisplay(connections, { force = false } = {}) {
 
   quotaDisplayRefreshPromise = (async () => {
     try {
+      active[0].taskboardQuotaReadAttempted = true;
       const snapshot = await readCodexQuotaSnapshotForDisplay(active[0]);
       quotaDisplaySnapshot = snapshot;
       quotaDisplayUnavailable = null;
@@ -1403,6 +1544,10 @@ async function readInjectionStatus(cdp) {
       pageVisible: document.getElementById("codex-taskboard-page")?.hidden === false,
       frameReady: window.__codexTaskboardInjection__?.ready === true,
       frameUrl: document.getElementById("codex-taskboard-frame")?.src || null,
+      quotaDirectNavigationChild: document.getElementById("codex-taskboard-quota-display")
+        ?.parentElement?.matches('nav[role="navigation"][aria-label]') === true,
+      scrollDirectNavigationChild: document.querySelector("[data-app-action-sidebar-scroll]")
+        ?.parentElement?.matches('nav[role="navigation"][aria-label]') === true,
       quotaDisplay: window.__codexTaskboardQuotaDisplay__?.status?.() || null
     })`,
     returnByValue: true,
@@ -1410,8 +1555,11 @@ async function readInjectionStatus(cdp) {
   return status.result.value;
 }
 
-async function waitForInjectionStatus(cdp, shouldOpen, expectedSourceHash, timeoutMs) {
+async function waitForInjectionStatus(cdp, shouldOpen, expectedSourceHash, timeoutMs, {
+  heartbeat = null,
+} = {}) {
   const deadline = Date.now() + timeoutMs;
+  let nextHeartbeatAt = 0;
   let status = await readInjectionStatus(cdp);
   while (
     Date.now() < deadline
@@ -1421,10 +1569,113 @@ async function waitForInjectionStatus(cdp, shouldOpen, expectedSourceHash, timeo
       || (shouldOpen && (!status.pageVisible || !status.frameUrl || !status.frameReady))
     )
   ) {
+    if (heartbeat && Date.now() >= nextHeartbeatAt) {
+      await heartbeat();
+      nextHeartbeatAt = Date.now() + 2_000;
+    }
     await new Promise((resolve) => setTimeout(resolve, 250));
     status = await readInjectionStatus(cdp);
   }
   return status;
+}
+
+function injectionReadinessSummary(status, expectedSourceHash, frameLoaded) {
+  return {
+    sourceActive: status?.sourceHash === expectedSourceHash,
+    entryMounted: status?.entryMounted === true,
+    pageMounted: status?.pageMounted === true,
+    pageVisible: status?.pageVisible === true,
+    frameCreated: Boolean(status?.frameUrl),
+    frameReady: status?.frameReady === true,
+    frameLoaded: frameLoaded === true,
+    quotaMounted: status?.quotaDisplay?.mounted === true,
+    quotaCleaned: status?.quotaDisplay?.cleaned === true,
+    quotaDirectNavigationChild: status?.quotaDirectNavigationChild === true,
+    scrollDirectNavigationChild: status?.scrollDirectNavigationChild === true,
+  };
+}
+
+async function reportCandidateInjectionFailure(cdp, status, sourceHash, frameLoaded) {
+  console.error(JSON.stringify({ injectionReadiness:
+    injectionReadinessSummary(status, sourceHash, frameLoaded) }));
+  if (process.env.AGENT_DESK_LOOPBACK_CANDIDATE !== "1") return;
+  const diagnostic = {
+    anchorProbeAvailable: false, childProbeAvailable: false,
+    quotaReadAttempted: cdp.taskboardQuotaReadAttempted === true,
+    quotaSnapshotAvailable: Boolean(quotaDisplaySnapshot),
+    quotaAccountReadComplete: cdp.taskboardQuotaReadState?.accountReadComplete === true,
+    quotaRateLimitsReadComplete: cdp.taskboardQuotaReadState?.rateLimitsReadComplete === true,
+    quotaNormalized: cdp.taskboardQuotaReadState?.normalized === true,
+  };
+  try {
+    const probe = await probeRendererContract(
+      (method, params) => cdp.send(method, params),
+      { timeoutMs: 0 },
+    );
+    if (probe.checks) {
+      diagnostic.anchorProbeAvailable = true;
+      diagnostic.anchorCompatible = probe.compatible;
+      diagnostic.headerReference = probe.checks?.headerReference === true;
+      diagnostic.sidebar = probe.checks?.sidebar === true;
+      diagnostic.sidebarScroll = probe.checks?.sidebarScroll === true;
+      diagnostic.pageMount = probe.checks?.pageMount === true;
+    }
+  } catch {}
+  try {
+    const nameResult = await cdp.send("Runtime.evaluate", {
+      expression: 'document.getElementById("codex-taskboard-frame")?.name || null',
+      returnByValue: true,
+    });
+    const frameName = nameResult.result?.value;
+    if (typeof frameName === "string" && /^codex-taskboard-[0-9a-f-]{36}$/.test(frameName)) {
+      const { frameTree } = await cdp.send("Page.getFrameTree");
+      const frame = findFrameByName(frameTree, frameName);
+      diagnostic.childFrameMatched = Boolean(frame);
+      if (frame) {
+        const { executionContextId } = await cdp.send("Page.createIsolatedWorld", {
+          frameId: frame.id,
+          worldName: "agent-desk-readiness-diagnostic",
+        });
+        const child = await cdp.send("Runtime.evaluate", {
+          contextId: executionContextId,
+          expression: `(() => {
+            let baseHostCodex = false;
+            try { baseHostCodex = new URL(document.baseURI).searchParams.get("host") === "codex"; }
+            catch {}
+            const root = document.getElementById("root");
+            return {
+              documentComplete: document.readyState === "complete",
+              baseHostCodex,
+              modulePresent: Boolean(document.querySelector('script[type="module"][src]')),
+              rootPresent: Boolean(root),
+              rootPopulated: Boolean(root?.childElementCount),
+            };
+          })()`,
+          returnByValue: true,
+        });
+        if (!child.exceptionDetails && child.result?.value) {
+          diagnostic.childProbeAvailable = true;
+          for (const key of ["documentComplete", "baseHostCodex", "modulePresent",
+            "rootPresent", "rootPopulated"]) {
+            diagnostic[key] = child.result.value[key] === true;
+          }
+        }
+      }
+    }
+  } catch {}
+  console.error(JSON.stringify({ injectionFailureShape: diagnostic }));
+  if (diagnostic.anchorProbeAvailable && !diagnostic.anchorCompatible) {
+    try {
+      const shape = await cdp.send("Runtime.evaluate", {
+        expression: sidebarDiagnosticExpression,
+        returnByValue: true,
+      });
+      const summary = shape.exceptionDetails ? null : normalizeSidebarDiagnostic(shape.result?.value);
+      console.error(JSON.stringify({ injectionSidebarShape: summary }));
+    } catch {
+      console.error(JSON.stringify({ injectionSidebarShape: null }));
+    }
+  }
 }
 
 async function evaluateInjectionSource(cdp, source) {
@@ -1454,20 +1705,31 @@ async function registerInjectionSource(cdp, source) {
   return registration.identifier;
 }
 
-async function detachInjection(cdp) {
+async function detachInjection(cdp, { audit = false } = {}) {
   unregisterQuotaPolicyCdp(cdp);
   try {
-    await cdp.send("Runtime.evaluate", {
+    const cleanup = await cdp.send("Runtime.evaluate", {
       expression: `(() => {
         if (window.__CODEX_TASKBOARD_PENDING_INJECTION__) {
           window.__CODEX_TASKBOARD_PENDING_INJECTION__.cancelled = true;
         }
         window.__codexTaskboardQuotaDisplay__?.cleanup?.();
         window.__codexTaskboardInjection__?.destroy?.();
+        return {
+          quotaHostPresent: Boolean(document.getElementById("codex-taskboard-quota-display")),
+          entryPresent: Boolean(document.getElementById("codex-taskboard-entry")),
+        };
       })()`,
       returnByValue: true,
     });
-  } catch (_) {}
+    if (audit) console.error(JSON.stringify({ injectionCleanup: {
+      evaluationOk: !cleanup.exceptionDetails,
+      quotaHostPresent: cleanup.result?.value?.quotaHostPresent === true,
+      entryPresent: cleanup.result?.value?.entryPresent === true,
+    } }));
+  } catch (_) {
+    if (audit) console.error(JSON.stringify({ injectionCleanup: { transportFailed: true } }));
+  }
   if (cdp.taskboardScriptIdentifier) {
     try {
       await cdp.send("Page.removeScriptToEvaluateOnNewDocument", {
@@ -1511,14 +1773,36 @@ async function injectTarget(
   attachExisting,
   startupToken,
   compatibility,
+  sidebarDiagnosticOnly = false,
 ) {
+  logLaunchDiagnostic("renderer-probe-start");
   const cdp = await runtime.connect(target);
   let retained = false;
   let injectionStarted = false;
   try {
     await cdp.send("Runtime.enable");
     const contractProbe = await probeRendererContract((method, params) => cdp.send(method, params));
+    logLaunchDiagnostic("renderer-contract", contractProbe);
+    if (sidebarDiagnosticOnly) {
+      const evaluation = await cdp.send("Runtime.evaluate", {
+        expression: sidebarDiagnosticExpression,
+        returnByValue: true,
+      });
+      const diagnostic = evaluation.exceptionDetails ? null
+        : normalizeSidebarDiagnostic(evaluation.result?.value);
+      return {
+        result: {
+          injected: false,
+          compatibilityMode: "diagnostic-only",
+          compatibilityReason: contractProbe.reason,
+          compatibilityChecks: contractProbe.checks,
+          sidebarDiagnostic: diagnostic,
+        },
+        connection: null,
+      };
+    }
     if (!contractProbe.compatible) {
+      retained = keepAlive;
       return {
         result: {
           injected: false,
@@ -1527,6 +1811,7 @@ async function injectTarget(
           compatibilityChecks: contractProbe.checks,
         },
         connection: null,
+        rejectionConnection: retained ? cdp : null,
       };
     }
     const capabilities = contractProbe.capabilities;
@@ -1567,6 +1852,8 @@ async function injectTarget(
         await publishCodexQuotaDisplay(cdp);
       });
       await hostBridge.publishHeartbeat();
+      await refreshCodexQuotaDisplay([cdp]);
+      await hostBridge.publishHeartbeat();
       await publishCodexQuotaDisplay(cdp);
       if (shouldOpen && !reconciled.shouldRemainOpen) {
         await cdp.send("Runtime.evaluate", {
@@ -1580,11 +1867,17 @@ async function injectTarget(
         shouldRemainOpen,
         sourceHash,
         15_000,
+        { heartbeat: () => hostBridge.publishHeartbeat() },
       );
+      if (status.sourceHash !== sourceHash || !status.entryMounted) {
+        await reportCandidateInjectionFailure(cdp, status, sourceHash, false);
+        throw new Error("Taskboard sidebar entry did not mount in the Codex renderer");
+      }
       const frameLoaded = status.frameUrl
         ? await waitForFrame(cdp, status.frameUrl, 15_000)
         : false;
       if (shouldRemainOpen && (!status.frameReady || !frameLoaded)) {
+        await reportCandidateInjectionFailure(cdp, status, sourceHash, frameLoaded);
         throw new Error("Taskboard frame did not report ready in the Codex renderer");
       }
       await cdp.send("Page.setBypassCSP", { enabled: false });
@@ -1593,6 +1886,8 @@ async function injectTarget(
         result: {
           ...status,
           injected: true,
+          quotaReadAttempted: cdp.taskboardQuotaReadAttempted === true,
+          quotaReadState: cdp.taskboardQuotaReadState,
           compatibilityMode: compatibility.mode,
           compatibilityCapabilities: capabilities,
           ...(contractProbe ? { compatibilityChecks: contractProbe.checks } : {}),
@@ -1613,10 +1908,21 @@ async function injectTarget(
     });
     await evaluateInjectionSource(cdp, source);
     await publishInjectionScriptIdentifier(cdp, scriptIdentifier);
-    if (keepAlive) await hostBridge.publishHeartbeat();
-    if (keepAlive) await publishCodexQuotaDisplay(cdp);
+    if (keepAlive) {
+      await hostBridge.publishHeartbeat();
+      // The validated native quota bridge does not depend on iframe readiness.
+      await refreshCodexQuotaDisplay([cdp]);
+      await hostBridge.publishHeartbeat();
+      await publishCodexQuotaDisplay(cdp);
+    }
+    const heartbeat = keepAlive ? () => hostBridge.publishHeartbeat() : null;
+    const entryStatus = await waitForInjectionStatus(cdp, false, sourceHash, 60_000, { heartbeat });
+    if (entryStatus.sourceHash !== sourceHash || !entryStatus.entryMounted) {
+      await reportCandidateInjectionFailure(cdp, entryStatus, sourceHash, false);
+      throw new Error("Taskboard sidebar entry did not mount in the Codex renderer");
+    }
     if (shouldOpen) {
-      await waitForInjectionStatus(cdp, false, sourceHash, 60_000);
+      if (heartbeat) await heartbeat();
       await cdp.send("Runtime.evaluate", {
         expression: `(() => {
           const taskboard = window.__codexTaskboardInjection__;
@@ -1626,17 +1932,24 @@ async function injectTarget(
       });
       await new Promise((resolve) => setTimeout(resolve, 500));
     }
-    const status = await waitForInjectionStatus(cdp, shouldOpen, sourceHash, 15_000);
+    const status = await waitForInjectionStatus(cdp, shouldOpen, sourceHash, 15_000, { heartbeat });
+    if (status.sourceHash !== sourceHash || !status.entryMounted) {
+      await reportCandidateInjectionFailure(cdp, status, sourceHash, false);
+      throw new Error("Taskboard sidebar entry did not mount in the Codex renderer");
+    }
     const frameLoaded = status.frameUrl
       ? await waitForFrame(cdp, status.frameUrl, 15_000)
       : false;
     if (shouldOpen && (!status.frameReady || !frameLoaded)) {
+      await reportCandidateInjectionFailure(cdp, status, sourceHash, frameLoaded);
       throw new Error("Taskboard frame did not report ready in the Codex renderer");
     }
     await cdp.send("Page.setBypassCSP", { enabled: false });
     const result = {
       ...status,
       injected: true,
+      quotaReadAttempted: cdp.taskboardQuotaReadAttempted === true,
+      quotaReadState: cdp.taskboardQuotaReadState,
       compatibilityMode: compatibility.mode,
       compatibilityCapabilities: capabilities,
       ...(contractProbe ? { compatibilityChecks: contractProbe.checks } : {}),
@@ -1652,7 +1965,7 @@ async function injectTarget(
     return { result, connection: retained ? cdp : null };
   } finally {
     if (!retained) {
-      if (injectionStarted) await detachInjection(cdp);
+      if (injectionStarted) await detachInjection(cdp, { audit: true });
       else cdp.close();
     }
   }
@@ -1669,6 +1982,7 @@ async function injectAll(
   startupToken,
   compatibility,
   rejectedTargets,
+  sidebarDiagnosticOnly = false,
 ) {
   const targets = await runtime.targets();
   if (targets.length === 0) {
@@ -1688,13 +2002,13 @@ async function injectAll(
   }
 
   const results = [];
-  for (const target of targets) {
+  for (const [targetIndex, target] of targets.entries()) {
     if (injectedTargets.has(target.id)) continue;
     const rejected = rejectedTargets.get(target.id);
-    if (rejected && rejected.retryAt > Date.now()) continue;
+    if (!rejectedTargets.shouldProbe(target.id)) continue;
     const firstTarget = injectedTargets.size === 0
       && !results.some((result) => result.injected === true);
-    const { result, connection } = await injectTarget(
+    const { result, connection, rejectionConnection } = await injectTarget(
       runtime,
       target,
       shouldOpen && firstTarget,
@@ -1704,17 +2018,36 @@ async function injectAll(
       attachExisting,
       startupToken,
       compatibility,
+      sidebarDiagnosticOnly,
     );
     if (connection) {
       injectedTargets.set(target.id, connection);
       rejectedTargets.delete(target.id);
     } else if (result.injected === false) {
-      rejectedTargets.set(target.id, {
-        retryAt: Date.now() + 30_000,
+      if (sidebarDiagnosticOnly) {
+        const fingerprint = JSON.stringify({
+          checks: result.compatibilityChecks,
+          structure: result.sidebarDiagnostic,
+        });
+        if (rejected?.diagnosticFingerprint !== fingerprint
+          && (rejected?.diagnosticCount || 0) < 2) {
+          console.log(JSON.stringify({
+            sidebarDiagnostic: result.sidebarDiagnostic,
+            compatibilityChecks: result.compatibilityChecks,
+            diagnosticUnavailable: result.sidebarDiagnostic === null,
+            candidateOrdinal: targetIndex + 1,
+          }));
+          result.diagnosticFingerprint = fingerprint;
+          result.diagnosticCount = (rejected?.diagnosticCount || 0) + 1;
+        }
+      }
+      rejectedTargets.remember(target.id, rejectionConnection, {
+        diagnosticFingerprint: result.diagnosticFingerprint || rejected?.diagnosticFingerprint,
+        diagnosticCount: result.diagnosticCount || rejected?.diagnosticCount || 0,
         reason: result.compatibilityReason,
-      });
+      }, injectedTargets.size === 0);
     }
-    results.push({ targetId: target.id, title: target.title, url: target.url, ...result });
+    results.push(result);
   }
   return results;
 }
@@ -1751,12 +2084,16 @@ async function main() {
   let cdpRuntime = null;
   let runtimePublishPromise = null;
   let idleAfterNormalExit = false;
+  let rendererWaitStartedAt = 0;
+  let rendererWaitReportAt = 0;
+  let rendererSeen = false;
+  let injectedOnce = false;
   let stopping = false;
   let openControl = null;
   let openRequestGeneration = options.open ? 1 : 0;
   let openedRequestGeneration = 0;
   const injectedTargets = new Map();
-  const rejectedTargets = new Map();
+  const rejectedTargets = new RendererRejectionCache();
   let wakeStop;
   const stopRequested = new Promise((resolve) => { wakeStop = resolve; });
   const hasOpenPending = () => openedRequestGeneration < openRequestGeneration;
@@ -1818,11 +2155,39 @@ async function main() {
   };
 
   const launchManagedCodex = async () => {
-    const launched = await launchCodexWithPipe(options.appPath);
-    codexProcess = launched.child;
-    cdpRuntime = pipeCdpRuntime(launched.browser);
+    if (options.windowsLoopbackCandidate || options.windowsRegistered) {
+      startupAttemptId = randomUUID();
+      logLaunchDiagnostic("activation-started");
+      const port = await reserveLoopbackPort();
+      const activated = activateRegisteredCodex({ port, appPath: options.appPath,
+        mode: options.windowsRegistered ? "launcher" : "source-test" });
+      if (activated.packageVersion !== codexPackageVersion) {
+        throw new Error("Registered Codex version changed during candidate startup");
+      }
+      logLaunchDiagnostic("activation-ready", { pid: activated.pid });
+      logLaunchDiagnostic("spawn-returned", { pid: activated.pid });
+      // The registered process is not our child. Never send it a kill signal.
+      codexProcess = { pid: activated.pid, exitCode: null, signalCode: null, unref() {} };
+      const processObserver = watchRegisteredProcess(activated.pid);
+      if (!await processObserver.ready) {
+        processObserver.close();
+        throw new Error("Could not observe the registered Codex lifecycle");
+      }
+      cdpRuntime = createLoopbackCandidateRuntime(port, activated.pid, {
+        processObserver,
+        onDiscovery: (discovery) => logLaunchDiagnostic("renderer-discovery", discovery),
+      });
+    } else {
+      const launched = await launchCodexWithPipe(options.appPath);
+      codexProcess = launched.child;
+      cdpRuntime = pipeCdpRuntime(launched.browser);
+    }
     rejectedTargets.clear();
     idleAfterNormalExit = false;
+    rendererWaitStartedAt = Date.now();
+    rendererWaitReportAt = 0;
+    rendererSeen = false;
+    injectedOnce = false;
   };
 
   let cleanupPromise = null;
@@ -1836,14 +2201,16 @@ async function main() {
       if (pendingRuntimePublish) {
         try { await pendingRuntimePublish; } catch {}
       }
-      const serviceStop = supervisor.stop();
-      const descriptorStop = removeTaskboardRuntime();
+      const serviceStop = options.sidebarDiagnosticOnly ? Promise.resolve() : supervisor.stop();
+      const descriptorStop = options.sidebarDiagnosticOnly
+        ? Promise.resolve() : removeTaskboardRuntime();
       const launchedCodex = codexProcess;
       codexProcess = null;
-      if (launchedCodex && launchedCodex.exitCode === null && launchedCodex.signalCode === null) {
+      if (launchedCodex && !options.windowsLoopbackCandidate && !options.windowsRegistered
+        && launchedCodex.exitCode === null && launchedCodex.signalCode === null) {
         if (preserveCodex) {
           launchedCodex.unref();
-          console.log(JSON.stringify({ codexPreservedOnExit: true, pid: launchedCodex.pid }));
+          console.log(JSON.stringify({ codexDetachRequested: true, pid: launchedCodex.pid }));
         } else {
           const exit = new Promise((resolve) => launchedCodex.once("exit", resolve));
           launchedCodex.kill("SIGTERM");
@@ -1869,23 +2236,34 @@ async function main() {
   const requestSignalStop = () => requestStop();
 
   if (options.watch) {
-    openControl = createInterface({ input: process.stdin, terminal: false });
-    openControl.on("line", (line) => {
-      if (line.trim() === "open") queueTaskboardOpen();
-      else if (line.trim() === "stop") requestStop();
-      else if (line.trim() === "stop-keep-codex") requestStop({ preserveCodex: true });
-    });
-    openControl.on("close", () => requestStop({ preserveCodex: true }));
+    if (!options.windowsLoopbackCandidate) {
+      openControl = createInterface({ input: process.stdin, terminal: false });
+      openControl.on("line", (line) => {
+        if (line.trim() === "open") queueTaskboardOpen();
+        else if (line.trim() === "stop") requestStop();
+        else if (line.trim() === "stop-keep-codex") requestStop({ preserveCodex: true });
+      });
+      openControl.on("close", () => requestStop({ preserveCodex: true }));
+      console.log(JSON.stringify({ openTaskboardSignalReady: true }));
+    }
     process.once("SIGINT", requestSignalStop);
     process.once("SIGTERM", requestSignalStop);
-    console.log(JSON.stringify({ openTaskboardSignalReady: true }));
   }
 
   try {
-    await supervisor.ensure({ force: true });
-    await publishRuntime();
+    if (!options.sidebarDiagnosticOnly) {
+      await supervisor.ensure({ force: true });
+      await publishRuntime();
+    }
 
     if (codexCompatibility.mode === "shortcut-plugin-only") {
+      if (options.windowsRegistered || options.windowsLoopbackCandidate) {
+        const activated = activateRegisteredCodex({ appPath: options.appPath, mode: "ordinary" });
+        logLaunchDiagnostic("spawn-returned", { pid: activated.pid });
+        console.log(JSON.stringify({ compatibilityMode: "shortcut-plugin-only", codexPackageVersion,
+          compatibilityReason: codexCompatibility.reason, minimumVersion: minimumWindowsCodexVersion }));
+        return;
+      }
       const fallback = spawn(codexExecutablePath(options.appPath), [], {
         detached: true,
         env: withoutTaskboardLauncherEnvironment(process.env),
@@ -1929,9 +2307,54 @@ async function main() {
             options.startupToken,
             codexCompatibility,
             rejectedTargets,
+            options.sidebarDiagnosticOnly,
           );
-          if (results.length > 0) console.log(JSON.stringify({ injected: results }, null, 2));
-          await refreshCodexQuotaDisplay([...injectedTargets.values()]);
+          if (results.length > 0 || injectedTargets.size > 0) rendererSeen = true;
+          const rendererWaitMs = Date.now() - rendererWaitStartedAt;
+          if (!injectedOnce && rendererWaitMs >= rendererDiscoveryTimeoutMs) {
+            logLaunchDiagnostic("renderer-timeout", { pid: codexProcess?.pid });
+            process.exitCode = 1;
+            requestStop({ preserveCodex: true });
+            continue;
+          }
+          if (!rendererSeen && rendererWaitMs >= rendererWaitReportAt + 20_000) {
+            rendererWaitReportAt = rendererWaitMs;
+            logLaunchDiagnostic("renderer-waiting", {
+              pid: codexProcess?.pid,
+              elapsedSeconds: Math.floor(rendererWaitMs / 1_000),
+            });
+          }
+          for (const result of results) {
+            if (result.injected === true) injectedOnce = true;
+            logLaunchDiagnostic("injection-result", {
+              pid: codexProcess?.pid,
+              injected: result.injected === true,
+              frameLoaded: result.frameLoaded === true,
+            });
+            console.log(JSON.stringify({
+              rendererInjection: {
+                injected: result.injected === true,
+                compatibilityMode: result.compatibilityMode,
+                compatibilityReason: result.compatibilityReason,
+                compatibilityChecks: result.compatibilityChecks,
+                compatibilityCapabilities: result.compatibilityCapabilities,
+                frameLoaded: result.frameLoaded === true,
+                cspBypassed: result.cspBypassed === true,
+                entryMounted: result.entryMounted === true,
+                quotaMounted: result.quotaDisplay?.mounted === true,
+                quotaFresh: result.quotaDisplay?.freshness === "fresh",
+                quotaReadAttempted: result.quotaReadAttempted === true,
+                quotaAccountReadComplete: result.quotaReadState?.accountReadComplete === true,
+                quotaRateLimitsReadComplete: result.quotaReadState?.rateLimitsReadComplete === true,
+                quotaNormalized: result.quotaReadState?.normalized === true,
+                quotaDirectNavigationChild: result.quotaDirectNavigationChild === true,
+                scrollDirectNavigationChild: result.scrollDirectNavigationChild === true,
+              },
+            }));
+          }
+          if (!options.sidebarDiagnosticOnly) {
+            await refreshCodexQuotaDisplay([...injectedTargets.values()]);
+          }
           if (openThisPass && results.some((result) => result.injected === true)) {
             openedRequestGeneration = openRequestGeneration;
           } else if (hasOpenPending()) {
@@ -1952,6 +2375,11 @@ async function main() {
         stopRequested,
       ]);
       if (stopping) break;
+
+      if (options.sidebarDiagnosticOnly) {
+        if (!cdpRuntime?.isHealthy()) requestStop({ preserveCodex: true });
+        continue;
+      }
 
       try {
         const service = await supervisor.ensure();
@@ -1976,22 +2404,44 @@ async function main() {
       }
 
       if (!cdpRuntime?.isHealthy()) {
-        const exitCode = codexProcess?.exitCode;
+        const exitCode = cdpRuntime?.exitCode?.() ?? codexProcess?.exitCode;
+        const codexPid = codexProcess?.pid;
         await detachAll();
         cdpRuntime?.close();
         cdpRuntime = null;
         codexProcess = null;
-        if (exitCode === 0) {
+        if (options.sidebarDiagnosticOnly) {
+          requestStop({ preserveCodex: true });
+        } else if ((options.windowsRegistered || options.windowsLoopbackCandidate)
+          && managedCodexExitAction(exitCode, injectedOnce) === "idle") {
+          logLaunchDiagnostic("codex-exited", { pid: codexPid, exitCode: 0 });
+          requestStop({ preserveCodex: true });
+        } else if (!options.windowsLoopbackCandidate && !options.windowsRegistered
+          && managedCodexExitAction(exitCode, injectedOnce) === "idle") {
           idleAfterNormalExit = true;
           console.error("Waiting after normal Codex exit; use the tray or plugin to restart it.");
         } else {
-          console.error("Codex exited unexpectedly; restarting the signed official app.");
-          await launchManagedCodex();
-          if (options.open) queueTaskboardOpen();
+          openedRequestGeneration = openRequestGeneration;
+          logLaunchDiagnostic("startup-failed", {
+            pid: codexPid,
+            exitCode,
+            reason: exitCode === 0 ? "before-injection" : "connection-lost",
+          });
+          console.error("Codex did not complete Agent Desk startup; automatic retries stopped.");
+          process.exitCode = 1;
+          requestStop({ preserveCodex: exitCode === null });
         }
       }
     }
   } finally {
+    if (options.windowsLoopbackCandidate && !options.sidebarDiagnosticOnly
+      && !injectedOnce && process.exitCode !== 1) {
+      logLaunchDiagnostic("startup-failed", {
+        pid: codexProcess?.pid,
+        reason: "before-injection",
+      });
+      process.exitCode = 1;
+    }
     if (options.watch) {
       process.removeListener("SIGINT", requestSignalStop);
       process.removeListener("SIGTERM", requestSignalStop);

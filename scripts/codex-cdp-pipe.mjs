@@ -123,9 +123,11 @@ export class CdpPipeBrowser extends CdpEventChannel {
     });
   }
 
-  async open() {
+  async open(onStage = () => {}) {
     await this.send("Browser.getVersion");
+    onStage("browser-version");
     await this.send("Target.setDiscoverTargets", { discover: true });
+    onStage("target-discovery");
   }
 
   receive(chunk) {
