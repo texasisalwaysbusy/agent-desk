@@ -12,6 +12,10 @@
     "sha256": "094311d46e5a3894c65245b6da50f4f2254be4c3eb49b086111a8fb28e3c4117"
   },
   {
+    "path": "CHANGELOG.md",
+    "sha256": "6e5cdb7d53208509e524d38931232735347df0a2940cbbe90d42c064f3ee12a7"
+  },
+  {
     "path": "LICENSE",
     "sha256": "4ece0487497375a922296eeec5f18a2b86badf6d8bccbc81cb4386e62ccb07e3"
   },
@@ -25,11 +29,11 @@
   },
   {
     "path": "README.md",
-    "sha256": "074441e132dbcdf381aa1fddbd2c9932cd8d52eb967c77a236ac49f0a11b5d36"
+    "sha256": "3391bfbdac58a7be3c7e2ded94201fadef92f78ebdb8a1786b70c0b970c9b595"
   },
   {
     "path": "README.zh-CN.md",
-    "sha256": "7624020348b020e17e196ca9f73032c81dddc1bf7a2559b4f36e3714153a0cea"
+    "sha256": "02c56e995ed976b964fb9abe3a993ce252219d4f0e2b24f0fadef3c8b293c240"
   },
   {
     "path": "cli/agentdesk.mjs",
@@ -48,6 +52,26 @@
     "sha256": "5be7542ddde7945735d489e3ea699e787f20581570dbb05d1af586a2c7b78dbe"
   },
   {
+    "path": "docs/assets/showcase-board.png",
+    "sha256": "2636e73a4d23ad3d393ec495691eab209e33f7f65fa903cc8e2d1c90b2a0d621"
+  },
+  {
+    "path": "docs/assets/showcase-dashboard.png",
+    "sha256": "1d3693f39b98b430db0db277460267a836625c5636be72fb7f3ffa36724ab9ed"
+  },
+  {
+    "path": "docs/assets/showcase-gantt.png",
+    "sha256": "7eeb124be865d6d0eade0ef7f4257d23ecd80a6db765749e4c6dc46a1c542c14"
+  },
+  {
+    "path": "docs/assets/showcase-list.png",
+    "sha256": "f24ba54ffc40499eac46256bc2e3d4753f658d6af4d90d46aa63e6d1423f6755"
+  },
+  {
+    "path": "docs/known-issues.md",
+    "sha256": "29715d8ca2d9acd043d242cd1be4824ccae17f3c8ddf5ffa1bc1a105a6c8ba8b"
+  },
+  {
     "path": "docs/licensing.md",
     "sha256": "963e0402fb071630d984cbc3b5637e56314b580b70ffa77f29ac4a522b5b5aeb"
   },
@@ -62,6 +86,10 @@
   {
     "path": "docs/release-1.2.2.md",
     "sha256": "bc16b035a07a876802349ae4d44d518f8d5d9cd800602b6f5c330cbd609a3d9b"
+  },
+  {
+    "path": "docs/showcase.md",
+    "sha256": "57466dbed3e0b20cf2663962e8f9c7197be595a310d2181c4f7a5118fbccc822"
   },
   {
     "path": "docs/startup-diagnostics.md",

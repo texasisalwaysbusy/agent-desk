@@ -1,72 +1,77 @@
 # Agent Desk · 智能体工作台
 
-**用于任务管理、智能体协作和人工审阅的本地工作台。**
+**Turn scattered agent conversations into work you can track, review and finish.**
 
-**A local workspace for agent tasks, collaboration and human review.**
+**把分散的智能体对话，组织成可追踪、可审阅、可完成的项目。**
 
-[简体中文](README.zh-CN.md) · [Architecture](docs/architecture.md) · [Identity and compatibility](docs/product-identity.md) · [Publishing](docs/publishing.md)
+[Download for Windows](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.2) · [简体中文](README.zh-CN.md) · [Screenshots](docs/showcase.md) · [Changelog](CHANGELOG.md)
 
-Agent Desk brings project and task management, agent progress, handoff review,
-automation preparation and usage information into the official Codex desktop app.
-It is an independently maintained product derived from Dashi Taskboard, not an
-OpenAI product or an official upstream release. See [NOTICE](NOTICE) for ancestry.
+Agent Desk is a local project workspace inside the official Codex desktop app on Windows. Keep tasks, deadlines, agent assignments and human review in one place: see what needs attention, return to the conversation behind a task, and decide what is ready to move forward.
 
-Agent Desk 面向 Windows 上的官方 Codex 桌面应用，提供项目与任务管理、智能体执行进展、
-交接审批、自动化准备和额度信息。它是从 Dashi Taskboard 演进而来的独立维护产品，
-不是 OpenAI 官方产品，也不是上游官方发行版。完整中文说明见 [README.zh-CN.md](README.zh-CN.md)。
+It is independently maintained and derived from Dashi Taskboard. It is not an OpenAI product or an official upstream release. [Attribution](NOTICE) · [License](docs/licensing.md)
 
-**许可 / Licensing:** 源码可用；适用的新增部分与改动采用 Apache-2.0 + Commons Clause 1.0。
-Source-available; covered additions and modifications use Apache-2.0 + Commons Clause 1.0.
+![Agent Desk dashboard showing reviews, blockers and deadlines in a fictional launch project](docs/assets/showcase-dashboard.png)
 
-## What it does
+*Actual v1.2.2 web UI with fictional demo data, rendered in a local preview. No real projects, accounts or agent runs are shown; this is not a screenshot of the Codex host.*
 
-- An action-focused dashboard: reviews, blockers, deadlines and work in progress.
-- Project boards, lists, Gantt views, search, labels, comments and attachments.
-- Task-to-conversation navigation and project automation preparation.
-- Handoff approval review through an authenticated local receiver integration.
-- A compact allowance card in the native sidebar.
+## One project, several ways to work
 
-## Preview / 效果示例
+| When you need to… | Agent Desk helps you… |
+| --- | --- |
+| Decide what to handle next | Use the dashboard to find reviews, blockers, overdue work and upcoming deadlines. |
+| Follow work across stages | Move through a task board with owners, priorities, labels and dates. |
+| Scan a larger backlog | Use the compact list, search and filters to find the next issue. |
+| Plan a sequence of work | Put start and due dates on a Gantt timeline. |
+| Understand how a result was produced | Keep descriptions, comments and attachments with the task, and return to its linked Codex conversation. |
+| Review an agent handoff | Inspect the proposed operations and risks through a separately configured local approval integration. |
+| Pace longer sessions | Read remaining 5-hour and weekly usage allowances and reset countdowns in the native sidebar. |
 
-![Agent Desk borderless sidebar allowance display in Chinese and English, using demo data](docs/assets/allowance-preview.png)
+### Keep the workflow visible
 
-The allowance card shows the remaining 5-hour and weekly usage percentages and reset
-countdowns. This preview renders the actual borderless component (1.0.6) with
-synthetic data in illustrative sidebars, retaining threshold colors. It is not
-a full Codex screenshot or a substitute for installed-host acceptance.
+![Task board with fictional tasks assigned to a person and two agents](docs/assets/showcase-board.png)
 
-额度卡展示 5 小时与每周使用额度及重置倒计时。上图使用演示数据，不包含真实账户信息；
-它使用实际的 1.0.6 无边框组件渲染，不代表完整 Codex 界面或安装验收结果。
+Tasks move through To do, In progress, Blocked and In review. You can distinguish an agent's assignment from the result that still needs a person to check. A task marked “In progress” does not by itself prove that an agent is currently running.
 
-## Download / 下载
+### See the schedule, not just the queue
 
-**[Download Agent Desk 1.2.2 for Windows x64 / 下载 Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.2/Agent-Desk-1.2.2-Windows-x64-setup.exe)**
+![Gantt timeline with fictional task dates](docs/assets/showcase-gantt.png)
 
-[Release notes and SHA-256 / 中英文发行说明与校验文件](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.2)
+Use dates to see how work overlaps and what is coming next. Prefer a compact overview? The [gallery](docs/showcase.md) also shows the list view.
 
-Windows x64 is the supported distribution target. The installer is unsigned and
-installs for the current user. The equivalent rc.6 build passed installed startup,
-sidebar/quota presence, normal exit and manual restart on Codex 26.924.2738.0;
-1.2.2 promotes that implementation with stable version metadata and a Release build.
-The second session's Codex exit code and tray version label were not observed;
-installed executable/resource hashes matched. Live receiver-approval execution
-is not certified by this acceptance. Other platforms are not supported.
+### Keep review separate from execution
 
-安装前请正常退出 Codex 与旧版 Taskboard 托盘程序，保留旧版安装及数据作为回退点，
-不要同时运行两套启动器。安装包未签名；本次已验证 rc.6 的安装、启动、侧栏、首次
-正常退出和手动重开。第二轮 Codex 退出码与托盘版本文字未确认，安装文件哈希已核对；
-此次验收不代表人工审批执行流程已认证。
+The approval center presents human-readable handoff details when the local receiver integration is configured. Receiving a request, claiming a task and moving a task to review are different events. A review decision does not automatically start an agent or grant open-ended command access.
 
-## Development
+Project automation prepares requests for Codex's native Scheduled tasks. Agent Desk does not add its own background scheduler. The task CLI and local MCP plugin support agent access to project work.
 
-For a Codex startup failure, [live startup diagnostics](docs/startup-diagnostics.md)
-can be followed from a separate terminal without opening the workbench.
+## A practical first workflow
 
-Codex 启动失败时，可在另一个终端使用[实时启动诊断](docs/startup-diagnostics.md)，
-无需等待工作台窗口出现。
+1. Install Agent Desk, then start Codex through the Agent Desk tray after exiting any ordinary Codex session normally.
+2. Open the workbench, choose a project and create tasks with a clear outcome, owner and due date.
+3. Link the relevant conversation and use the board or list to track progress.
+4. Review results, resolve blockers and mark accepted work complete. Use the dashboard for the next decision.
 
-Use Node.js 24 and npm. For Windows packaging, install Rust stable 1.88 or newer,
-the MSVC C++ workload and Windows SDK.
+## Download and compatibility
+
+**[Agent Desk 1.2.2 · Windows x64 installer](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.2/Agent-Desk-1.2.2-Windows-x64-setup.exe)**
+
+[Release notes and SHA-256](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.2) · [Known issues and candidate status](docs/known-issues.md)
+
+The current public stable release is v1.2.2, built with the Release profile. Its installer is unsigned and installs for the current user. Automatic updates are disabled; login autostart is optional. Only Windows x64 is supported.
+
+The equivalent rc.6 runtime was accepted on Codex 26.924.2738.0 for installed startup, workbench/quota presence, the first normal exit and manual restart. Later maintenance candidates for newer Codex clients are still undergoing regression work and are **not included in this download**. See the [changelog](CHANGELOG.md) before assuming the stable package contains candidate fixes.
+
+Exit Codex and the old tray normally before installing or starting through Agent Desk. Preserve the old installation and data for rollback; do not run two launchers at once. Renderer compatibility is checked structurally on each new document; future Codex versions are not guaranteed compatible. Live approval execution has separate setup and acceptance requirements.
+
+## Local data and clear boundaries
+
+New installations store application data under `%LOCALAPPDATA%\AgentDesk`; existing legacy stores are reused without an automatic move. Ambiguous stores produce an error rather than an automatic merge. See [compatibility](docs/product-identity.md) and [privacy](PRIVACY.md).
+
+The launcher uses the registered official Store package and the existing login profile, validates identity and signatures, and opens a random `127.0.0.1` Codex debugging listener. Other same-machine processes can reach that listener; it is not protected by the workbench API's authentication. Agent Desk does not modify the official package or read authentication databases, and it does not attach to an ordinary running Codex. Normal Codex exit closes its debugging listener.
+
+## Build and contribute
+
+Use Node.js 24 and npm. Windows packaging also needs Rust stable 1.88+, the MSVC C++ workload and Windows SDK.
 
 ```powershell
 npm ci
@@ -74,47 +79,12 @@ npm run check
 npm run app:build:windows
 ```
 
-`npm run dev` starts the local development frontend and service. `npm run agentdesk -- --help`
-opens CLI usage. See [AGENTS.md](AGENTS.md) for validation and security rules.
-Installers built here are unsigned and install for the current user. Automatic
-updates are disabled. Enabling login autostart is a separate user action.
-
-## Data and compatibility
-
-New installations use `%LOCALAPPDATA%\AgentDesk`; existing legacy stores are reused
-without an automatic move. Ambiguous stores cause an explicit error. The independent
-installer does not silently replace the old application. Follow the [compatibility
-notes](docs/product-identity.md) before local acceptance or migration.
-
-The Windows launcher uses registered Store activation and the
-existing login profile. It validates the package and executable signatures on
-every manual start, then checks the renderer structure before injection. Minor
-version numbers do not require an allowlist update; an unknown structure fails
-closed. Future versions are not guaranteed compatible.
-
-This route opens a random `127.0.0.1` debugging port owned by the activated Codex
-process. Other same-machine processes can reach it; CDP is not authenticated by
-Agent Desk's API credentials. The launcher reads no authentication database and
-never attaches to an ordinary running Codex. Exit Codex normally before starting
-Agent Desk. See [PRIVACY.md](PRIVACY.md). The stable installer is compiled in Release
-mode. It retains sanitized diagnostic/error logs; standalone developer experiments
-are not the default launch path. A locally retained rc.6 installation need not be
-replaced by the public stable build.
+`npm run dev` runs a local development preview; `npm run agentdesk -- --help` shows CLI usage. Read [AGENTS.md](AGENTS.md), [architecture](docs/architecture.md) and [startup diagnostics](docs/startup-diagnostics.md). Bug reports are most useful with version, steps, expected/actual behavior and sanitized diagnostics; do not include tokens or private conversations.
 
 ## Source and license
 
-**Source-available: Apache-2.0 + Commons Clause 1.0 for covered Agent Desk changes.**
-You may use, study, modify and redistribute the covered software free of charge,
-including internal business use. Selling the software itself or charging for a
-product or service whose value derives entirely or substantially from its
-functionality requires separate permission from the relevant rights holders.
-This includes repackaged paid downloads and paid hosted access. It does not
-ban ordinary paid work performed using the tool or independent value-added products.
+**Source-available. Covered Agent Desk additions and modifications use Apache-2.0 with Commons Clause 1.0.** Upstream Dashi portions retain Apache-2.0; third-party components retain their own licenses.
 
-Upstream Dashi Taskboard portions retain Apache-2.0; third-party components retain
-their own licenses. These restrictions cannot remove their existing rights.
-See [LICENSE](LICENSE), [NOTICE](NOTICE), and [licensing examples](docs/licensing.md).
-Do not describe the combined project as OSI-approved open source.
+Use, study, modify and redistribute the covered software free of charge, including internal business use. Selling the software or a product/service whose value derives entirely or substantially from its functionality requires separate permission from the relevant rights holders. Ordinary paid work performed using the tool is not prohibited merely because it is paid. This combined license is not OSI-approved open source.
 
-Use the curated source export described in [Publishing](docs/publishing.md),
-not the private working checkout or its local operational records.
+[LICENSE](LICENSE) · [NOTICE](NOTICE) · [Licensing examples](docs/licensing.md) · [Curated source publishing](docs/publishing.md)
