@@ -14,7 +14,7 @@ const embeddedHost = await readFile(new URL("../web/src/embeddedHost.mjs", impor
 
 test("injection is an idempotent IIFE guarded by its current source hash", () => {
   assert.match(source, /^\(\(\) => \{/);
-  assert.match(source, /const VERSION = "0\.6\.15"/);
+  assert.match(source, /const VERSION = "0\.6\.21"/);
   assert.match(source, /const SOURCE_HASH = window\.__CODEX_TASKBOARD_SOURCE_HASH__/);
   assert.match(source, /const SENTINEL_KEY = "__codexTaskboardInjection__"/);
   assert.match(source, /previous\?\.sourceHash === SOURCE_HASH/);
@@ -40,10 +40,10 @@ test("entry follows the native sidebar row and the page covers the complete Code
   assert.match(source, /const PLUGIN_LABELS = \["插件", "plugins"\]/);
   assert.match(source, /if \(plugin\?\.parentElement\) return plugin;/);
   assert.match(source, /return directButtons\.length >= 3/);
-  assert.match(source, /: reference\.cloneNode\(true\)/);
+  assert.doesNotMatch(source, /reference\.cloneNode|button\.className = reference\.className/);
   assert.match(source, /reference\.after\(entry\)/);
-  assert.match(source, /document\.querySelector\("\.app-shell-main-content-frame"\)/);
-  assert.match(source, /const surface = viewport\?\.parentElement/);
+  assert.match(source, /document\.querySelectorAll\("\.app-shell-main-content-frame"\)/);
+  assert.match(source, /const surface = viewport\?\.matches\("main"\) \? viewport : viewport\?\.parentElement/);
   assert.match(source, /surface\.appendChild\(page\)/);
   assert.match(source, /#\$\{PAGE_ID\} \{[\s\S]*?top: 0;/);
   assert.doesNotMatch(source, /--codex-taskboard-top-offset/);
@@ -123,7 +123,7 @@ test("opening asks the resident launcher to ensure the service and rebuilds fail
   assert.match(source, /const HOST_REQUEST_MESSAGE = "__codexTaskboardHostRequestV1"/);
   assert.match(source, /return requestHost\("ensure"\)/);
   assert.match(source, /result\.restarted/);
-  assert.match(source, /loadTaskboardFrame\(\)/);
+  assert.match(source, /loadTaskboardFrame\(cacheBust\)/);
   assert.match(source, /waitForFrameReady\(\)/);
   assert.match(source, /function onHostBridgeMessage/);
   assert.match(source, /function hasLiveHostBinding/);
@@ -133,7 +133,7 @@ test("opening asks the resident launcher to ensure the service and rebuilds fail
 test("the injected iframe can be cache-busted without reloading the Codex shell", () => {
   assert.match(source, /const FRAME_REFRESH_PARAM = "__codex_taskboard_refresh"/);
   assert.match(source, /function reloadFrame\(\)/);
-  assert.match(source, /loadTaskboardFrame\(true\)/);
+  assert.match(source, /prepareFrame\(generation, true\)/);
   assert.match(source, /reloadFrame,/);
 });
 
@@ -149,7 +149,7 @@ test("reopening reuses a ready cache-busted iframe without showing the startup p
   assert.match(prepareSource, /if \(canReuseFrame\) showFrame\(\);\s*else showLoading\(\);/);
   assert.match(
     prepareSource,
-    /if \(!frameReady \|\| result\.restarted \|\| !frameMatchesTaskboardUrl\(taskboardUrl\)\) \{\s*showLoading\(\);/,
+    /if \(!frameReady \|\| !frameLoadAcknowledged \|\| !frame\?\.isConnected \|\| result\.restarted \|\| !frameMatchesTaskboardUrl\(taskboardUrl\)\) \{\s*showLoading\(\);/,
   );
   assert.doesNotMatch(prepareSource, /async function prepareTaskboard\(generation\) \{\s*showLoading\(\);/);
 });
@@ -374,7 +374,8 @@ test("host context captures all Codex projects even when the sidebar section is 
   assert.match(source, /data-app-action-sidebar-section-collapsed/);
   assert.match(source, /async function captureHostContext\(\)/);
   assert.match(source, /while \(!section && Date\.now\(\) < sectionDeadline\)/);
-  assert.match(source, /requestHostEnsure\(taskboardUrl\),\s*captureHostContext\(\),/);
+  assert.match(source, /void captureHostContext\(\)\.then/);
+  assert.match(source, /const result = await requestHostEnsure\(taskboardUrl\)/);
   assert.match(source, /let lastNativeThreadId = ""/);
   assert.match(source, /clickedThreadId.*lastNativeThreadId/s);
   assert.match(source, /const currentThreadId = activeThreadId \|\| runningThreadId \|\| lastNativeThreadId/);

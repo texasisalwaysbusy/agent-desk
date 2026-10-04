@@ -19,6 +19,7 @@ import {
   taskboardAutomationPolicyOperation,
 } from "../shared/taskboard-automation.mjs";
 import {
+  createHostHeartbeatPump,
   handleHostBindingPayload,
   reconcileInjectionRuntime,
 } from "./codex-injector-runtime.mjs";
@@ -47,6 +48,9 @@ import {
 } from "./codex-cdp-loopback-candidate.mjs";
 import { readNativeModelCatalog } from "./codex-model-catalog.mjs";
 import { createApprovalAdapter } from "./handoff-approval.mjs";
+import { createQuotaObserver } from "./codex-quota-observer.mjs";
+import { createQuotaTraceBudget, sanitizeQuotaTrace } from "../shared/quota-trace.mjs";
+import { createWorkbenchTraceBudget, sanitizeWorkbenchTrace } from "../shared/workbench-trace.mjs";
 
 const injectorPath = fileURLToPath(import.meta.url);
 const projectRoot = path.resolve(path.dirname(injectorPath), "..");
@@ -89,6 +93,9 @@ process.env.CODEX_TASKBOARD_VERSION = taskboardVersion;
 const codexPackageVersion = process.env.CODEX_TASKBOARD_CODEX_VERSION?.trim() || "unknown";
 const rendererDiscoveryTimeoutMs = 75_000;
 let startupAttemptId = null;
+let rendererOrdinal = 0;
+let emitQuotaTrace = createQuotaTraceBudget((trace) => logLaunchDiagnostic("quota-trace", { trace }));
+let emitWorkbenchTrace = createWorkbenchTraceBudget((trace) => logLaunchDiagnostic("workbench-trace", { trace }));
 const codexCompatibility = classifyWindowsCodexCompatibility({
   platform: process.platform,
   version: codexPackageVersion,
@@ -100,16 +107,41 @@ function logLaunchDiagnostic(event, details = {}) {
     "renderer-probe-start", "renderer-contract", "renderer-timeout",
     "injection-result", "startup-failed",
     "activation-started", "activation-ready",
+    "activation-refused", "activation-failed", "codex-exit-unobserved", "codex-observation-stopping",
+    "quota-trace",
+    "workbench-trace",
+    "workbench-health",
+    "frame-bootstrap", "process-observation",
   ].includes(event)) return;
   const line = JSON.stringify({
     launchDiagnostic: {
       at: new Date().toISOString(),
       event,
+      ...(["ready", "timeout", "invalidated", "contract-refused", "frame-refused", "failed", "busy"].includes(details.bootstrap)
+        ? { bootstrap: details.bootstrap } : {}),
+      ...(["timeout", "recovered", "failed"].includes(details.observation)
+        ? { observation: details.observation } : {}),
+      ...(Number.isInteger(details.observationFailures) && details.observationFailures >= 0 && details.observationFailures <= 3
+        ? { observationFailures: details.observationFailures } : {}),
+      ...(event === "quota-trace" ? { trace: sanitizeQuotaTrace(details.trace) } : {}),
+      ...(event === "workbench-trace" ? { trace: sanitizeWorkbenchTrace(details.trace) } : {}),
+      ...(event === "workbench-health" && ["ready", "loading", "error", "inactive"].includes(details.health)
+        ? { health: details.health } : {}),
+      ...(Number.isSafeInteger(details.renderer) && details.renderer > 0 && details.renderer <= 1000000
+        ? { renderer: details.renderer } : {}),
       ...(startupAttemptId ? { attemptId: startupAttemptId } : {}),
       agentDeskVersion: taskboardVersion,
       codexVersion: codexPackageVersion,
       ...(Number.isInteger(details.pid) ? { pid: details.pid } : {}),
+      ...(["selection", "package", "activation-preparation", "activation-call", "process-validation", "listener-validation"].includes(details.activationStage)
+        ? { activationStage: details.activationStage } : {}),
+      ...(["codex-running", "mode-not-selected", "invalid-port", "package-not-found", "manifest-missing",
+        "package-identity-mismatch", "signature-invalid", "port-taken", "process-not-visible",
+        "process-path-unavailable", "path-mismatch", "listener-misowned", "listener-timeout", "helper-error"].includes(details.activationReason)
+        ? { activationReason: details.activationReason } : {}),
       ...(Number.isInteger(details.exitCode) ? { exitCode: details.exitCode } : {}),
+      ...(["registered-process-handle", "child-process"].includes(details.exitCodeSource)
+        ? { exitCodeSource: details.exitCodeSource } : {}),
       ...(Number.isInteger(details.elapsedSeconds) && details.elapsedSeconds >= 0 && details.elapsedSeconds <= 120
         ? { elapsedSeconds: details.elapsedSeconds }
         : {}),
@@ -144,6 +176,7 @@ function logLaunchDiagnostic(event, details = {}) {
       ...(typeof details.reason === "string" && [
         "before-injection", "connection-lost", "renderer-contract-mismatch",
         "invalid-probe-result", "probe-evaluation-failed", "probe-transport-failed",
+        "codex-running", "activation-failed", "launcher-stopped",
       ].includes(details.reason)
         ? { reason: details.reason }
         : {}),
@@ -362,6 +395,9 @@ function codexExecutablePath(appPath) {
 
 async function launchCodexWithPipe(appPath) {
   startupAttemptId = randomUUID();
+  rendererOrdinal = 0;
+  emitQuotaTrace = createQuotaTraceBudget((trace) => logLaunchDiagnostic("quota-trace", { trace }));
+  emitWorkbenchTrace = createWorkbenchTraceBudget((trace) => logLaunchDiagnostic("workbench-trace", { trace }));
   logLaunchDiagnostic("spawn-started");
   const child = spawn(
     codexExecutablePath(appPath),
@@ -374,7 +410,7 @@ async function launchCodexWithPipe(appPath) {
   );
   logLaunchDiagnostic("spawn-returned", { pid: child.pid });
   child.once("exit", (exitCode, signal) => {
-    logLaunchDiagnostic("codex-exited", { pid: child.pid, exitCode, signal });
+    logLaunchDiagnostic("codex-exited", { pid: child.pid, exitCode, signal, exitCodeSource: "child-process" });
   });
   child.stdio[4].once("end", () => {
     logLaunchDiagnostic("cdp-output-ended", { pid: child.pid });
@@ -461,6 +497,7 @@ function findFrameByName(frameTree, frameName) {
 async function verifiedTaskboardDocument(frameCapability) {
   const challenge = randomBytes(32).toString("hex");
   const response = await fetch(taskboardPageUrl, {
+    signal: AbortSignal.timeout(2_000),
     cache: "no-store",
     headers: {
       origin: "app://-",
@@ -476,28 +513,164 @@ async function verifiedTaskboardDocument(frameCapability) {
   const html = await response.text();
   const head = "<head>";
   if (!html.includes(head)) throw new Error("Taskboard document has no head element");
+  const origin = new URL(taskboardPageUrl).origin;
+  const nonce = randomBytes(24).toString("base64");
+  // Document replacement does not transfer the verified server's CSP header.
+  // Give the owned opaque document its own local-only policy, with one nonce
+  // for its fixed capability bootstrap; native host policy stays untouched.
+  const policy = `default-src 'none'; script-src ${origin} 'nonce-${nonce}'; style-src ${origin} 'unsafe-inline'; img-src ${origin} data: blob:; font-src ${origin}; connect-src ${origin}; frame-src 'none'; object-src 'none'; base-uri ${origin}; form-action ${origin}`;
   return html.replace(
     head,
-    `${head}<base href=${JSON.stringify(taskboardPageUrl)}><script>globalThis.__CODEX_TASKBOARD_FRAME_CAPABILITY__=${JSON.stringify(frameCapability)};</script>`,
+    `${head}<meta http-equiv="Content-Security-Policy" content=${JSON.stringify(policy)}><base href=${JSON.stringify(taskboardPageUrl)}><script nonce=${JSON.stringify(nonce)}>globalThis.__CODEX_TASKBOARD_FRAME_CAPABILITY__=${JSON.stringify(frameCapability)};</script>`,
   );
 }
 
 async function loadTaskboardFrameViaCdp(cdp, frameName, frameCapability) {
+  const emit = (bootstrap) => {
+    cdp.taskboardBootstrapRecords = (cdp.taskboardBootstrapRecords || 0) + 1;
+    if (cdp.taskboardBootstrapRecords <= 24) logLaunchDiagnostic("frame-bootstrap", { bootstrap });
+  };
+  if (cdp.taskboardFrameLoadInFlight) {
+    emit("busy");
+    throw new Error("An isolated Taskboard frame is already loading");
+  }
+  cdp.taskboardFrameLoadInFlight = true;
+  try {
+    const result = await initializeTaskboardFrameViaCdp(cdp, frameName, frameCapability);
+    emit("ready");
+    return result;
+  } catch (error) {
+    const reasons = new Map([
+      ["Isolated Taskboard bootstrap timed out", "timeout"],
+      ["Taskboard bootstrap document changed or expired", "invalidated"],
+      ["Current renderer contract does not allow frame loading", "contract-refused"],
+      ["Taskboard frame recreation refused", "frame-refused"],
+      ["Taskboard frame is not a fresh direct child", "frame-refused"],
+      ["Recreated Taskboard frame is not a fresh direct child", "frame-refused"],
+    ]);
+    emit(reasons.get(error.message) || "failed");
+    throw error;
+  }
+  finally { cdp.taskboardFrameLoadInFlight = false; }
+}
+
+async function initializeTaskboardFrameViaCdp(cdp, frameName, frameCapability) {
+  const loadDeadline = Date.now() + 10_000;
   const html = await verifiedTaskboardDocument(frameCapability);
+  const probe = await probeRendererContract((method, params) => cdp.send(method, params), { timeoutMs: 0 });
+  if (!probe.compatible || !probe.capabilities.fullPanel) throw new Error("Current renderer contract does not allow frame loading");
   const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     const { frameTree } = await cdp.send("Page.getFrameTree");
     const targetFrame = findFrameByName(frameTree, frameName);
     if (targetFrame) {
-      await cdp.send("Page.setDocumentContent", {
-        frameId: targetFrame.id,
-        html,
-      });
-      return { loaded: true };
+      if (targetFrame.parentId !== frameTree.frame.id || targetFrame.url !== "about:blank") {
+        throw new Error("Taskboard frame is not a fresh direct child");
+      }
+      // setDocumentContent retains about:blank's inherited native CSP. The
+      // initial startup bypass has already been restored on subsequent opens.
+      // Keep the window bounded to our verified document's module bootstrap;
+      // the marker is diagnostic only, never proof of bridge authorization.
+      let invalidated = false;
+      const restore = () => { invalidated = true; void cdp.send("Page.setBypassCSP", { enabled: false }).catch(() => {}); };
+      const cancel = cdp.on("Page.frameNavigated", ({ frame }) => { if (frame && !frame.parentId) restore(); });
+      const safetyTimer = setTimeout(restore, Math.max(1, Math.min(8_000, loadDeadline - Date.now())));
+      let ownedFrameId = null;
+      try {
+        await cdp.send("Page.setBypassCSP", { enabled: true });
+        if (invalidated) throw new Error("Taskboard bootstrap document changed or expired");
+        // Chromium applies the bypass when the child browsing context is
+        // created, not retroactively to its inherited policy. Recreate only
+        // our still-blank iframe; keep its element/listeners and fresh authority.
+        const recreated = await cdp.send("Runtime.evaluate", { expression: `(() => {
+          const page = document.getElementById("codex-taskboard-page");
+          const frame = document.getElementById("codex-taskboard-frame");
+          if (!page?.isConnected || page.getAttribute("data-codex-taskboard-owned") !== "true"
+            || !frame || frame.parentElement !== page || frame.name !== ${JSON.stringify(frameName)}
+            || frame.getAttribute("src") !== "about:blank"
+            || frame.getAttribute("sandbox") !== "allow-scripts allow-forms allow-modals allow-downloads") return false;
+          frame.remove(); page.appendChild(frame); return true;
+        })()`, returnByValue: true });
+        if (recreated.result?.value !== true || invalidated) throw new Error("Taskboard frame recreation refused");
+        const freshTree = await cdp.send("Page.getFrameTree");
+        const freshFrame = findFrameByName(freshTree.frameTree, frameName);
+        if (!freshFrame || freshFrame.parentId !== freshTree.frameTree.frame.id || freshFrame.url !== "about:blank") {
+          throw new Error("Recreated Taskboard frame is not a fresh direct child");
+        }
+        ownedFrameId = freshFrame.id;
+        await cdp.send("Page.setDocumentContent", { frameId: freshFrame.id, html });
+        const { executionContextId } = await cdp.send("Page.createIsolatedWorld", {
+          frameId: freshFrame.id, worldName: "agent-desk-frame-bootstrap",
+        });
+        const bootstrapDeadline = Math.min(Date.now() + 8_000, loadDeadline);
+        while (Date.now() < bootstrapDeadline) {
+          const boot = await cdp.send("Runtime.evaluate", { contextId: executionContextId,
+            expression: 'document.getElementById("root")?.getAttribute("data-agent-desk-frame-boot") === "awaiting-challenge"',
+            returnByValue: true });
+          if (invalidated) throw new Error("Taskboard bootstrap document changed or expired");
+          if (boot.result?.value === true) return { loaded: true };
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        throw new Error("Isolated Taskboard bootstrap timed out");
+      } finally {
+        clearTimeout(safetyTimer);
+        cancel();
+        await cdp.send("Page.setBypassCSP", { enabled: false });
+        if (ownedFrameId) {
+          await restoreOwnedFrameCsp(cdp, ownedFrameId);
+          const { executionContextId } = await cdp.send("Page.createIsolatedWorld", {
+            frameId: ownedFrameId, worldName: "agent-desk-frame-policy",
+          });
+          // Meta policies parsed during the bypass window were ignored. Apply
+          // the fixed verified policy after restoring, inside our own document.
+          const policy = await cdp.send("Runtime.evaluate", { contextId: executionContextId,
+            expression: `(() => {
+              const original = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+              if (!original) return false;
+              const policy = document.createElement("meta");
+              policy.httpEquiv = "Content-Security-Policy"; policy.content = original.content;
+              document.head.appendChild(policy); return true;
+            })()`, returnByValue: true });
+          if (policy.result?.value !== true) throw new Error("Owned frame policy restoration refused");
+        }
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error("Timed out waiting for the isolated Taskboard frame");
+}
+
+async function restoreOwnedFrameCsp(cdp, ownedFrameId) {
+  // Opaque out-of-process frames inherit the flag at target creation. Restoring
+  // the parent's Page flag alone does not update an already-created OOPIF.
+  // Attach a short-lived protocol session ONLY to the exact owned frame ID to
+  // disable bypass; never enable it, evaluate code or discover a new app here.
+  const { targetInfos } = await cdp.send("Target.getTargets");
+  if (!Array.isArray(targetInfos)) throw new Error("Owned frame CSP target observation failed");
+  if (!targetInfos.some(target => target.targetId === ownedFrameId && target.type === "iframe")) return;
+  const { sessionId } = await cdp.send("Target.attachToTarget", { targetId: ownedFrameId, flatten: false });
+  if (typeof sessionId !== "string" || !sessionId) throw new Error("Owned frame CSP restoration failed");
+  let cancel, timer;
+  try {
+    const restored = new Promise((resolve, reject) => {
+      cancel = cdp.on("Target.receivedMessageFromTarget", (event) => {
+        if (event.sessionId !== sessionId) return;
+        let reply; try { reply = JSON.parse(event.message); } catch { return; }
+        if (reply.id !== 1) return;
+        if (reply.error) reject(new Error("Owned frame CSP restoration failed"));
+        else resolve();
+      });
+      timer = setTimeout(() => reject(new Error("Owned frame CSP restoration timed out")), 2_000);
+    });
+    // A failed send still needs a handled timer rejection during cleanup.
+    void restored.catch(() => {});
+    await cdp.send("Target.sendMessageToTarget", { sessionId,
+      message: JSON.stringify({ id: 1, method: "Page.setBypassCSP", params: { enabled: false } }) });
+    await restored;
+  } finally {
+    clearTimeout(timer); cancel?.();
+    await cdp.send("Target.detachFromTarget", { sessionId });
+  }
 }
 
 async function openWithDefaultApplication(target) {
@@ -1401,10 +1574,31 @@ async function sendHostResponse(cdp, executionContextId, response) {
 function installTaskboardHostBinding(cdp, supervisor, startupToken) {
   let activeContextId = null;
   let installInFlight = null;
+  let heartbeatInFlight = null;
+  let generation = 0;
+  let disposed = false;
+  const heartbeatPump = createHostHeartbeatPump(publishHeartbeat);
+  const invalidate = () => {
+    generation++;
+    activeContextId = null;
+    installInFlight = null;
+    heartbeatInFlight = null;
+    heartbeatPump.stop();
+    cdp.taskboardCompatibilityCapabilities = null;
+  };
+  const listeners = [
+    cdp.on("Runtime.executionContextsCleared", invalidate),
+    cdp.on("Runtime.executionContextDestroyed", (params) => {
+      if (params.executionContextId === activeContextId) invalidate();
+    }),
+    cdp.on("Page.frameNavigated", ({ frame }) => {
+      if (frame && !frame.parentId) invalidate();
+    }),
+  ];
 
-  cdp.on("Runtime.bindingCalled", async (params) => {
+  listeners.push(cdp.on("Runtime.bindingCalled", async (params) => {
     if (params.name !== hostBindingName) return;
-    if (params.executionContextId !== activeContextId) return;
+    if (disposed || activeContextId === null || params.executionContextId !== activeContextId) return;
     await handleHostBindingPayload(params, {
       isAuthorizedContext: (executionContextId) => executionContextId === activeContextId,
       parseAutomationRequest: parseTaskboardAutomationHostRequest,
@@ -1455,23 +1649,36 @@ function installTaskboardHostBinding(cdp, supervisor, startupToken) {
         sendHostResponse(cdp, executionContextId, response)
       ),
     });
-  });
+  }));
 
   async function install() {
+    if (disposed || !cdp.taskboardCompatibilityCapabilities?.fullPanel) {
+      throw new Error("The current document has no validated Taskboard host contract");
+    }
     if (installInFlight) return installInFlight;
-    installInFlight = (async () => {
+    if (activeContextId !== null) return activeContextId;
+    const currentGeneration = generation;
+    const checkCurrentDocument = () => {
+      if (disposed || currentGeneration !== generation || !cdp.taskboardCompatibilityCapabilities?.fullPanel) {
+        throw new Error("Taskboard host document changed during installation");
+      }
+    };
+    const installation = (async () => {
       const { frameTree } = await cdp.send("Page.getFrameTree");
+      checkCurrentDocument();
       const isolatedWorld = await cdp.send("Page.createIsolatedWorld", {
         frameId: frameTree.frame.id,
         worldName: "codex-taskboard-host",
       });
-      activeContextId = isolatedWorld.executionContextId;
+      checkCurrentDocument();
+      const contextId = isolatedWorld.executionContextId;
       await cdp.send("Runtime.addBinding", {
         name: hostBindingName,
-        executionContextId: activeContextId,
+        executionContextId: contextId,
       });
-      await cdp.send("Runtime.evaluate", {
-        contextId: activeContextId,
+      checkCurrentDocument();
+      const bindingResult = await cdp.send("Runtime.evaluate", {
+        contextId,
         expression: `(() => {
           const capability = ${JSON.stringify(hostCapability)};
           if (globalThis.__codexTaskboardIsolatedBridgeV1 === capability) return;
@@ -1491,23 +1698,43 @@ function installTaskboardHostBinding(cdp, supervisor, startupToken) {
         })()`,
         returnByValue: true,
       });
+      checkCurrentDocument();
+      if (bindingResult?.exceptionDetails) throw new Error("Taskboard host binding evaluation failed");
+      activeContextId = contextId;
       await restoreQuotaPolicies(cdp);
+      checkCurrentDocument();
+      heartbeatPump.start();
       return activeContextId;
     })();
+    installInFlight = installation;
     try {
-      return await installInFlight;
+      return await installation;
+    } catch (error) {
+      if (currentGeneration === generation) invalidate();
+      throw error;
     } finally {
-      installInFlight = null;
+      if (installInFlight === installation) installInFlight = null;
     }
   }
 
   async function publishHeartbeat() {
+    if (disposed || activeContextId === null || !cdp.taskboardCompatibilityCapabilities?.fullPanel) {
+      throw new Error("Taskboard host document is not validated");
+    }
+    if (heartbeatInFlight) return heartbeatInFlight;
+    const publication = publishCurrentHeartbeat(activeContextId, generation);
+    heartbeatInFlight = publication;
+    try { return await publication; }
+    finally { if (heartbeatInFlight === publication) heartbeatInFlight = null; }
+  }
+
+  async function publishCurrentHeartbeat(executionContextId, currentGeneration) {
     let timeout;
     try {
       await Promise.race([
         (async () => {
-          const executionContextId = await install();
-          await cdp.send("Runtime.evaluate", {
+          if (disposed || generation !== currentGeneration) throw new Error("Taskboard host document changed");
+          const result = await cdp.send("Runtime.evaluate", {
             contextId: executionContextId,
             expression: `window.postMessage({
               type: ${JSON.stringify(hostHeartbeatMessage)},
@@ -1517,20 +1744,35 @@ function installTaskboardHostBinding(cdp, supervisor, startupToken) {
             }, window.location.origin)`,
             returnByValue: true,
           });
+          if (disposed || generation !== currentGeneration) throw new Error("Taskboard host document changed");
+          if (result?.exceptionDetails) throw new Error("Taskboard host heartbeat evaluation failed");
         })(),
         new Promise((_, reject) => {
           timeout = setTimeout(() => {
-            cdp.close();
             reject(new Error("Timed out publishing the Taskboard host heartbeat"));
           }, 3_000);
         }),
       ]);
+    } catch (error) {
+      if (!disposed && generation === currentGeneration) {
+        invalidate();
+        cdp.close();
+      }
+      throw error;
     } finally {
       clearTimeout(timeout);
     }
   }
 
-  return { install, publishHeartbeat };
+  return {
+    install, publishHeartbeat,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      invalidate();
+      for (const remove of listeners) remove?.();
+    },
+  };
 }
 
 async function readInjectionStatus(cdp) {
@@ -1541,8 +1783,9 @@ async function readInjectionStatus(cdp) {
       scriptIdentifier: window[${JSON.stringify(injectionScriptIdentifierName)}] || null,
       entryMounted: Boolean(document.getElementById("codex-taskboard-entry")),
       pageMounted: Boolean(document.getElementById("codex-taskboard-page")),
-      pageVisible: document.getElementById("codex-taskboard-page")?.hidden === false,
-      frameReady: window.__codexTaskboardInjection__?.ready === true,
+      pageVisible: window.__codexTaskboardInjection__?.diagnostics?.().events.at(-1)?.pageVisible === true,
+      frameReady: window.__codexTaskboardInjection__?.ready === true
+        && window.__codexTaskboardInjection__?.diagnostics?.().events.at(-1)?.frameLoadAcknowledged === true,
       frameUrl: document.getElementById("codex-taskboard-frame")?.src || null,
       quotaDirectNavigationChild: document.getElementById("codex-taskboard-quota-display")
         ?.parentElement?.matches('nav[role="navigation"][aria-label]') === true,
@@ -1706,6 +1949,8 @@ async function registerInjectionSource(cdp, source) {
 }
 
 async function detachInjection(cdp, { audit = false } = {}) {
+  cdp.quotaObserver?.mark("detach-start");
+  cdp.hostBridge?.dispose();
   unregisterQuotaPolicyCdp(cdp);
   try {
     const cleanup = await cdp.send("Runtime.evaluate", {
@@ -1718,10 +1963,16 @@ async function detachInjection(cdp, { audit = false } = {}) {
         return {
           quotaHostPresent: Boolean(document.getElementById("codex-taskboard-quota-display")),
           entryPresent: Boolean(document.getElementById("codex-taskboard-entry")),
+          quotaObservation: location.protocol === "app:" && window.top === window ? {
+            appProtocol: true, topFrame: true,
+            apiPresent: typeof window.__codexTaskboardQuotaDisplay__?.diagnostics === "function",
+            trace: window.__codexTaskboardQuotaDisplay__?.diagnostics?.(),
+          } : null,
         };
       })()`,
       returnByValue: true,
     });
+    if (!cleanup.exceptionDetails) cdp.quotaObserver?.capture(cleanup.result?.value?.quotaObservation);
     if (audit) console.error(JSON.stringify({ injectionCleanup: {
       evaluationOk: !cleanup.exceptionDetails,
       quotaHostPresent: cleanup.result?.value?.quotaHostPresent === true,
@@ -1730,6 +1981,8 @@ async function detachInjection(cdp, { audit = false } = {}) {
   } catch (_) {
     if (audit) console.error(JSON.stringify({ injectionCleanup: { transportFailed: true } }));
   }
+  cdp.quotaObserver?.mark("detach-returned");
+  cdp.quotaObserver?.dispose();
   if (cdp.taskboardScriptIdentifier) {
     try {
       await cdp.send("Page.removeScriptToEvaluateOnNewDocument", {
@@ -1745,6 +1998,7 @@ async function detachInjection(cdp, { audit = false } = {}) {
 
 async function revalidateLoadedRenderer(cdp, allowedCapabilities) {
   const probe = await probeRendererContract((method, params) => cdp.send(method, params));
+  cdp.quotaObserver?.mark("contract-result", { compatible: probe.compatible });
   if (!probe.compatible) {
     console.log(JSON.stringify({
       compatibilityMode: "shortcut-plugin-only",
@@ -1775,14 +2029,15 @@ async function injectTarget(
   compatibility,
   sidebarDiagnosticOnly = false,
 ) {
-  logLaunchDiagnostic("renderer-probe-start");
+  const renderer = ++rendererOrdinal;
+  logLaunchDiagnostic("renderer-probe-start", { renderer });
   const cdp = await runtime.connect(target);
   let retained = false;
   let injectionStarted = false;
   try {
     await cdp.send("Runtime.enable");
     const contractProbe = await probeRendererContract((method, params) => cdp.send(method, params));
-    logLaunchDiagnostic("renderer-contract", contractProbe);
+    logLaunchDiagnostic("renderer-contract", { ...contractProbe, renderer });
     if (sidebarDiagnosticOnly) {
       const evaluation = await cdp.send("Runtime.evaluate", {
         expression: sidebarDiagnosticExpression,
@@ -1815,6 +2070,10 @@ async function injectTarget(
       };
     }
     const capabilities = contractProbe.capabilities;
+    if (keepAlive) cdp.quotaObserver = createQuotaObserver(cdp, renderer, emitQuotaTrace, {
+      emitWorkbench: emitWorkbenchTrace,
+      reportHealth: (health, renderer) => logLaunchDiagnostic("workbench-health", { health, renderer }),
+    });
     const { source, sourceHash } = await currentInjectionSource(capabilities);
     cdp.taskboardCompatibilityCapabilities = capabilities;
     const hostBridge = keepAlive
@@ -2157,26 +2416,38 @@ async function main() {
   const launchManagedCodex = async () => {
     if (options.windowsLoopbackCandidate || options.windowsRegistered) {
       startupAttemptId = randomUUID();
+      rendererOrdinal = 0;
+      emitQuotaTrace = createQuotaTraceBudget((trace) => logLaunchDiagnostic("quota-trace", { trace }));
+      emitWorkbenchTrace = createWorkbenchTraceBudget((trace) => logLaunchDiagnostic("workbench-trace", { trace }));
       logLaunchDiagnostic("activation-started");
-      const port = await reserveLoopbackPort();
-      const activated = activateRegisteredCodex({ port, appPath: options.appPath,
-        mode: options.windowsRegistered ? "launcher" : "source-test" });
-      if (activated.packageVersion !== codexPackageVersion) {
-        throw new Error("Registered Codex version changed during candidate startup");
+      try {
+        const port = await reserveLoopbackPort();
+        const activated = activateRegisteredCodex({ port, appPath: options.appPath,
+          mode: options.windowsRegistered ? "launcher" : "source-test" });
+        if (activated.packageVersion !== codexPackageVersion) {
+          throw new Error("Registered Codex version changed during candidate startup");
+        }
+        logLaunchDiagnostic("activation-ready", { pid: activated.pid });
+        logLaunchDiagnostic("spawn-returned", { pid: activated.pid });
+        // The registered process is not our child. Never send it a kill signal.
+        codexProcess = { pid: activated.pid, exitCode: null, signalCode: null, unref() {} };
+        const processObserver = watchRegisteredProcess(activated.pid);
+        if (!await processObserver.ready) {
+          processObserver.close();
+          throw new Error("Could not observe the registered Codex lifecycle");
+        }
+        cdpRuntime = createLoopbackCandidateRuntime(port, activated.pid, {
+          processObserver,
+          onDiscovery: (discovery) => logLaunchDiagnostic("renderer-discovery", discovery),
+          onObservation: (state) => logLaunchDiagnostic("process-observation", state),
+        });
+      } catch (error) {
+        const reason = error.diagnosticReason === "codex-running" ? "codex-running" : "activation-failed";
+        logLaunchDiagnostic(reason === "codex-running" ? "activation-refused" : "activation-failed", {
+          reason, activationReason: error.activationReason, activationStage: error.activationStage,
+        });
+        throw error;
       }
-      logLaunchDiagnostic("activation-ready", { pid: activated.pid });
-      logLaunchDiagnostic("spawn-returned", { pid: activated.pid });
-      // The registered process is not our child. Never send it a kill signal.
-      codexProcess = { pid: activated.pid, exitCode: null, signalCode: null, unref() {} };
-      const processObserver = watchRegisteredProcess(activated.pid);
-      if (!await processObserver.ready) {
-        processObserver.close();
-        throw new Error("Could not observe the registered Codex lifecycle");
-      }
-      cdpRuntime = createLoopbackCandidateRuntime(port, activated.pid, {
-        processObserver,
-        onDiscovery: (discovery) => logLaunchDiagnostic("renderer-discovery", discovery),
-      });
     } else {
       const launched = await launchCodexWithPipe(options.appPath);
       codexProcess = launched.child;
@@ -2194,6 +2465,15 @@ async function main() {
   const cleanup = ({ preserveCodex = false } = {}) => {
     if (cleanupPromise) return cleanupPromise;
     cleanupPromise = (async () => {
+      if ((options.windowsRegistered || options.windowsLoopbackCandidate) && cdpRuntime) {
+        const exitCode = cdpRuntime.exitCode?.();
+        if (Number.isInteger(exitCode)) {
+          logLaunchDiagnostic("codex-exited", { pid: codexProcess?.pid, exitCode,
+            exitCodeSource: "registered-process-handle" });
+        } else {
+          logLaunchDiagnostic("codex-observation-stopping", { pid: codexProcess?.pid, reason: "launcher-stopped" });
+        }
+      }
       await detachAll();
       cdpRuntime?.close();
       cdpRuntime = null;
@@ -2406,6 +2686,14 @@ async function main() {
       if (!cdpRuntime?.isHealthy()) {
         const exitCode = cdpRuntime?.exitCode?.() ?? codexProcess?.exitCode;
         const codexPid = codexProcess?.pid;
+        if (options.windowsRegistered || options.windowsLoopbackCandidate) {
+          if (Number.isInteger(exitCode)) {
+            logLaunchDiagnostic("codex-exited", { pid: codexPid, exitCode,
+              exitCodeSource: "registered-process-handle" });
+          } else {
+            logLaunchDiagnostic("codex-exit-unobserved", { pid: codexPid, reason: "connection-lost" });
+          }
+        }
         await detachAll();
         cdpRuntime?.close();
         cdpRuntime = null;
@@ -2414,7 +2702,6 @@ async function main() {
           requestStop({ preserveCodex: true });
         } else if ((options.windowsRegistered || options.windowsLoopbackCandidate)
           && managedCodexExitAction(exitCode, injectedOnce) === "idle") {
-          logLaunchDiagnostic("codex-exited", { pid: codexPid, exitCode: 0 });
           requestStop({ preserveCodex: true });
         } else if (!options.windowsLoopbackCandidate && !options.windowsRegistered
           && managedCodexExitAction(exitCode, injectedOnce) === "idle") {

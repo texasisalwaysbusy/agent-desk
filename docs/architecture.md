@@ -29,6 +29,17 @@ ordinary task API gains approval authority. A separately configured handoff rece
 is required; unavailable integration is shown as unavailable, not empty. Native host
 approval/execution acceptance remains a separate release gate.
 
+Approval record cleanup is presentation-only archival inside the review center.
+Revoked, outdated, invalid, expired or cancelled states are grouped into an archive;
+an unreadable old pending request can be archived from its list summary without
+preparing or approving it. Explicit archive/restore choices persist in the
+application-owned `approval-archive.json`, separate from the immutable mailbox and
+receiver decision/execution ledger. They never grant or revoke permission, delete
+history or stop a process; running requests cannot be manually archived. The
+existing validated host bridge checks a fresh allowed-project list before changing
+this view metadata. No agent execution/approval API is added. Approved live requests
+still require explicit revocation to prevent their unstarted operations.
+
 Agent automation uses official scheduling and preserves enablement, controller identity
 and per-task conversation bindings. No custom scheduler, telemetry, remote UI assets,
 LAN listener, automatic updater or second Codex profile is introduced.

@@ -1779,7 +1779,9 @@ export function App() {
     const removeExternalLinkHandler = installEmbeddedExternalLinkHandler();
     window.addEventListener("message", receiveHostMessage);
     postEmbeddedHostMessage({ type: "taskboard:frame-awaiting-challenge" });
+    document.getElementById("root")?.setAttribute("data-agent-desk-frame-boot", "awaiting-challenge");
     return () => {
+      document.getElementById("root")?.removeAttribute("data-agent-desk-frame-boot");
       window.removeEventListener("message", receiveHostMessage);
       setEmbeddedFrameChallenge("");
       removeExternalLinkHandler();

@@ -93,3 +93,73 @@ test("diagnostics command follows an append-only log without requiring the app w
     await rm(localAppData, { recursive: true, force: true });
   }
 });
+
+test("activation, refusal and observer records remain visible with only fixed metadata", () => {
+  assert.deepEqual(sanitizeStartupDiagnostic(JSON.stringify({ launchDiagnostic: {
+    event: "activation-failed", activationStage: "process-validation", activationReason: "path-mismatch",
+    raw: "private exception", path: "private path",
+  } })), { event: "activation-failed", activationStage: "process-validation", activationReason: "path-mismatch" });
+  assert.deepEqual(sanitizeStartupDiagnostic(JSON.stringify({ launchDiagnostic: {
+    event: "activation-failed", activationStage: "private path", activationReason: "private exception",
+  } })), { event: "activation-failed" });
+  for (const event of ["activation-started", "activation-ready", "activation-refused",
+    "activation-failed", "launcher-start-refused", "codex-exit-unobserved", "codex-observation-stopping"]) {
+    const record = sanitizeStartupDiagnostic(JSON.stringify({ launchDiagnostic: {
+      event, reason: "codex-running", stderr: "private exception", path: "private path",
+      url: "secret-url", token: "secret-token",
+    } }));
+    assert.deepEqual(record, { event, reason: "codex-running" });
+  }
+  for (const exitCode of [0, 7, -1073741819, 3221225477]) {
+    const record = sanitizeStartupDiagnostic(JSON.stringify({ launchDiagnostic: {
+      event: "codex-exited", exitCode, exitCodeSource: "registered-process-handle",
+    } }));
+    assert.equal(record.exitCode, exitCode);
+    assert.equal(record.exitCodeSource, "registered-process-handle");
+  }
+  const unknown = sanitizeStartupDiagnostic(JSON.stringify({ launchDiagnostic: {
+    event: "codex-exit-unobserved", exitCode: null, exitCodeSource: "guessed-zero",
+  } }));
+  assert.deepEqual(unknown, { event: "codex-exit-unobserved" });
+});
+
+test("attempt selection filters before limiting and keeps follow on the chosen attempt", async () => {
+  const localAppData = await mkdtemp(path.join(os.tmpdir(), "agent-desk-attempt-"));
+  const directory = path.join(localAppData, "DashiTaskboard", "logs");
+  const filePath = path.join(directory, "agent-desk-startup.jsonl");
+  const first = "11111111-1111-1111-1111-111111111111";
+  const second = "22222222-2222-2222-2222-222222222222";
+  const third = "33333333-3333-3333-3333-333333333333";
+  const line = (attemptId, event) => JSON.stringify({ launchDiagnostic: { attemptId, event } }) + "\n";
+  const controller = new AbortController();
+  const output = new PassThrough();
+  let printed = "";
+  output.setEncoding("utf8");
+  output.on("data", (chunk) => { printed += chunk; });
+  try {
+    await mkdir(directory, { recursive: true });
+    await writeFile(filePath, line(first, "activation-started") + line(second, "activation-started")
+      + line(first, "codex-exited") + line(second, "activation-ready"));
+    await runStartupDiagnostics(["--attempt", first, "--last", "2", "--json"], { localAppData, output });
+    assert.deepEqual(printed.trim().split("\n").map(JSON.parse).map((record) => record.attemptId), [first, first]);
+    printed = "";
+    const running = runStartupDiagnostics(["--latest-attempt", "--follow", "--json"], {
+      localAppData, output, signal: controller.signal,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    await appendFile(filePath, line(third, "activation-started") + line(second, "codex-exited"));
+    const deadline = Date.now() + 3000;
+    while (!printed.includes("codex-exited") && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    controller.abort();
+    assert.equal(await running, 0);
+    const records = printed.trim().split("\n").map(JSON.parse);
+    assert.deepEqual(records.map((record) => record.attemptId), [second, second, second]);
+    assert.deepEqual(records.map((record) => record.event), ["activation-started", "activation-ready", "codex-exited"]);
+  } finally {
+    controller.abort();
+    output.destroy();
+    await rm(localAppData, { recursive: true, force: true });
+  }
+});

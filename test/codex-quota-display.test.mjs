@@ -22,7 +22,7 @@ function fixture({ onQuotaShadow, modern = false } = {}) {
           <button aria-label="个人资料">用户</button>
         </div>
       </aside>`;
-  const dom = new JSDOM(`<!doctype html><html lang="zh-CN"><body>${sidebar}</body></html>`, {
+  const dom = new JSDOM(`<!doctype html><html lang="zh-CN"><style>nav { display:flex; flex-direction:column; }</style><body>${sidebar}</body></html>`, {
     pretendToBeVisual: true,
     runScripts: "outside-only",
     url: "app://codex/",
@@ -67,6 +67,65 @@ test("updated Codex sidebar places the quota card inside the validated navigatio
     assert.equal(scroller.nextElementSibling, host);
     assert.equal(host.hidden, false);
     assert.equal(host.shadowRoot, null);
+  } finally {
+    dom.window.__codexTaskboardQuotaDisplay__.cleanup();
+    dom.window.close();
+  }
+});
+
+test("quota recovers after unsupported scheduled navigation retained hidden beside the homepage", async () => {
+  const dom = fixture({ modern: true });
+  try {
+    const api = dom.window.__codexTaskboardQuotaDisplay__;
+    const home = dom.window.document.querySelector("nav");
+    const scheduled = dom.window.document.createElement("nav");
+    scheduled.setAttribute("role", "navigation");
+    scheduled.setAttribute("aria-label", "Fixture scheduled");
+    scheduled.hidden = true;
+    scheduled.innerHTML = '<div>Unsupported scheduled fixture</div>';
+    home.parentElement.append(scheduled);
+    const settle = () => new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+    await settle();
+    assert.equal(api.status().mounted, true);
+    for (let i = 0; i < 3; i++) {
+      home.setAttribute("inert", ""); scheduled.hidden = false;
+      await settle();
+      assert.equal(api.status().mounted, false);
+      scheduled.setAttribute("aria-hidden", "true"); home.removeAttribute("inert");
+      await settle();
+      assert.equal(api.status().mounted, true, "returns without API heartbeat, reinjection or restart");
+      scheduled.removeAttribute("aria-hidden"); scheduled.hidden = true;
+      await settle();
+    }
+    assert.equal(dom.window.document.querySelectorAll("#codex-taskboard-quota-display").length, 1);
+    const replacement = home.cloneNode(true);
+    replacement.querySelector("#codex-taskboard-quota-display").remove();
+    home.replaceWith(replacement);
+    await settle();
+    assert.equal(api.status().mounted, true);
+    assert.equal(replacement.lastElementChild.id, "codex-taskboard-quota-display");
+    scheduled.hidden = false; scheduled.innerHTML = '<div class="overflow-y-auto"><button class="sidebar-item">Ambiguous</button></div>';
+    await settle();
+    assert.equal(api.status().mounted, false, "two actually visible native navigations still park");
+    scheduled.hidden = true; await settle();
+    assert.equal(api.status().mounted, true);
+  } finally { dom.window.__codexTaskboardQuotaDisplay__.cleanup(); dom.window.close(); }
+});
+
+test("quota never toggles itself when its reserved space shrinks a native scroller to zero height", () => {
+  const dom = fixture({ modern: true });
+  try {
+    const api = dom.window.__codexTaskboardQuotaDisplay__;
+    const rect = dom.window.HTMLElement.prototype.getBoundingClientRect;
+    dom.window.HTMLElement.prototype.getBoundingClientRect = function () {
+      const value = rect.call(this);
+      if (this.matches("div.overflow-y-auto") && api.status().mounted) return { ...value, height: 0, bottom: value.top };
+      return value;
+    };
+    for (let i = 0; i < 3; i++) {
+      api.heartbeat();
+      assert.equal(api.status().mounted, true);
+    }
   } finally {
     dom.window.__codexTaskboardQuotaDisplay__.cleanup();
     dom.window.close();
@@ -215,6 +274,17 @@ test("a cleaned quota card remounts when the same source is injected again", () 
   }
 });
 
+test("quota theme follows explicit light/dark changes without waiting for another account snapshot", async () => {
+  const dom=fixture(), host=dom.window.document.getElementById("codex-taskboard-quota-display");
+  try {
+    for(const theme of ["dark","light","dark"]) {
+      dom.window.document.documentElement.setAttribute("data-theme",theme);
+      await new Promise(resolve=>dom.window.setTimeout(resolve,0));
+      assert.equal(host.getAttribute("data-quota-theme"),theme);
+    }
+  } finally { dom.window.__codexTaskboardQuotaDisplay__.cleanup();dom.window.close(); }
+});
+
 test("embedded quota card parks in Settings and exposes no remote UI dependencies", async () => {
   const dom = fixture();
   const api = dom.window.__codexTaskboardQuotaDisplay__;
@@ -225,7 +295,7 @@ test("embedded quota card parks in Settings and exposes no remote UI dependencie
 
   assert.equal(dom.window.document.getElementById("codex-taskboard-quota-display").hidden, true);
   assert.doesNotMatch(source, /https?:\/\/|fetch\(|WebSocket|remote-debugging-port|auth\.json/i);
-  assert.match(source, /prefers-reduced-motion/);
+  assert.doesNotMatch(source, /animation:|transition:/, "static material never needs motion suppression");
   assert.match(source, /forced-colors/);
   api.cleanup();
   dom.window.close();

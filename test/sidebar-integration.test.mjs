@@ -19,7 +19,7 @@ function fixture(nested) {
   const scroll = `<div class="overflow-y-auto" data-app-action-sidebar-scroll>
     <section data-app-action-sidebar-section><div role="button" class="sidebar-item"
       data-app-action-sidebar-project-row>Fixture project</div></section></div>`;
-  const dom = new JSDOM(`<!doctype html><html><body>
+  const dom = new JSDOM(`<!doctype html><html><style>nav { display:flex; flex-direction:column; }</style><body>
     <aside data-app-shell-left-panel-appearance="content-surface">
       <nav role="navigation" aria-label="App navigation">
         <div><button class="sidebar-item">New chat</button></div>
@@ -57,6 +57,112 @@ function dispose(dom) {
   dom.window.close();
 }
 
+test("header entry owns a separate row, parks on unsupported routes and restores without native mutations", () => {
+  const dom = fixture(true);
+  try {
+    const d = dom.window.document, nav = d.querySelector("nav"), header = nav.firstElementChild;
+    const nativeMarkup = header.outerHTML;
+    header.style.display = "flex";
+    const expectedHeader = header.outerHTML;
+    dom.window.eval(quotaSource); dom.window.eval(deskSource);
+    const api = dom.window.__codexTaskboardInjection__, entry = d.getElementById("codex-taskboard-entry");
+    const branch = nav.querySelector(".overflow-y-auto").parentElement;
+    assert.equal(entry.parentElement, nav); assert.equal(entry.nextElementSibling, branch);
+    assert.equal(header.outerHTML, expectedHeader); bothMounted(dom);
+    assert.equal(api.diagnostics().events.at(-1).entrySeparateRow, true);
+    header.hidden = true; branch.hidden = true; api.refresh();
+    assert.equal(entry.hidden, true, "independent row must not survive without its native reference");
+    header.hidden = false; branch.hidden = false; api.refresh(); bothMounted(dom);
+    assert.equal(entry.hidden, false);
+    api.destroy();
+    assert.equal(header.outerHTML, expectedHeader);
+    header.removeAttribute("style"); assert.equal(header.outerHTML, nativeMarkup);
+  } finally { dispose(dom); }
+});
+
+for (const invalid of ["wrong-owner", "wrong-layout", "wrong-position", "duplicate"]) {
+  test(`strict native contract cannot ignore an entry row with ${invalid}`, () => {
+    const dom = fixture(false);
+    try {
+      dom.window.eval(deskSource);
+      const d = dom.window.document, entry = d.getElementById("codex-taskboard-entry");
+      assert.equal(contract(dom).checks.headerReference, true);
+      if (invalid === "wrong-owner") entry.setAttribute("data-codex-taskboard-owned", "other");
+      else if (invalid === "wrong-layout") entry.setAttribute("data-codex-taskboard-entry-layout", "other");
+      else if (invalid === "wrong-position") entry.parentElement.append(entry);
+      else entry.after(entry.cloneNode(true));
+      assert.equal(contract(dom).checks.headerReference, false);
+      assert.equal(contract(dom).compatible, false);
+    } finally { dispose(dom); }
+  });
+}
+
+for (const nested of [false, true]) {
+  for (const hiddenBy of ["hidden", "inert", "aria-hidden", "display", "visibility"]) {
+    for (const position of ["before-header", "between", "after-scroll"]) {
+      test(`retained native child ${hiddenBy}/${position}/${nested ? "wrapped" : "direct"} cannot poison home recovery or New Chat contract`, async () => {
+        const dom = fixture(nested);
+        try {
+          dom.window.eval(quotaSource); dom.window.eval(deskSource);
+          const document = dom.window.document, nav = document.querySelector("nav");
+          const header = nav.firstElementChild, scroll = nav.querySelector(".overflow-y-auto");
+          const branch = nested ? scroll.parentElement : scroll;
+          const retained = document.createElement("div"); retained.className = "overflow-y-auto";
+          const hide = (node, value) => {
+            if (hiddenBy === "hidden" || hiddenBy === "inert") node.toggleAttribute(hiddenBy, value);
+            else if (hiddenBy === "aria-hidden") { if (value) node.setAttribute(hiddenBy, "true"); else node.removeAttribute(hiddenBy); }
+            else node.style[hiddenBy] = value ? (hiddenBy === "display" ? "none" : "hidden") : "";
+          };
+          hide(retained, true);
+          if (position === "before-header") nav.prepend(retained);
+          else if (position === "between") header.after(retained);
+          else nav.append(retained);
+          const settle = () => new Promise(resolve => dom.window.setTimeout(resolve, 100));
+          await settle(); bothMounted(dom);
+          for (let round = 0; round < 3; round++) {
+            hide(header, true); hide(branch, true); hide(retained, false);
+            await settle();
+            assert.equal(dom.window.__codexTaskboardQuotaDisplay__.status().mounted, false,
+              "unreferenced scheduled layout parks; no fallback to hidden home");
+            hide(header, false); hide(branch, false); hide(retained, true);
+            await settle(); bothMounted(dom);
+            const diagnostic = dom.window.__codexTaskboardQuotaDisplay__.diagnostics().events.at(-1);
+            assert.equal(diagnostic.reason, "mounted"); assert.equal(diagnostic.nativeChildren, 3); assert.equal(diagnostic.hiddenNativeChildren, 1);
+          }
+          document.getElementById("codex-taskboard-entry").click();
+          header.querySelector("button:not([data-codex-taskboard-owned])").click();
+          assert.equal(document.documentElement.hasAttribute("data-codex-taskboard-open"), false);
+        } finally { dispose(dom); }
+      });
+    }
+  }
+}
+
+test("hidden retained native navigation does not poison quota, entry or renderer contract; visible ambiguity is rejected", async () => {
+  const dom = fixture(true);
+  try {
+    dom.window.eval(quotaSource); dom.window.eval(deskSource);
+    const home = dom.window.document.querySelector('nav');
+    const retained = home.cloneNode(true);
+    retained.querySelectorAll('[data-codex-taskboard-owned]').forEach((node) => node.remove());
+    retained.setAttribute('aria-hidden', 'true');
+    home.parentElement.append(retained);
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 100));
+    bothMounted(dom);
+    home.setAttribute('inert', ''); retained.removeAttribute('aria-hidden');
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 100));
+    bothMounted(dom);
+    assert.equal(dom.window.document.getElementById('codex-taskboard-entry').closest('nav'), retained);
+    home.removeAttribute('inert');
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 0));
+    assert.equal(contract(dom).compatible, false);
+    assert.equal(dom.window.__codexTaskboardQuotaDisplay__.status().mounted, false);
+    retained.setAttribute('aria-hidden', 'true');
+    await new Promise((resolve) => dom.window.setTimeout(resolve, 100));
+    bothMounted(dom);
+  } finally { dispose(dom); }
+});
+
 for (const nested of [false, true]) {
   for (const quotaFirst of [true, false]) {
     test(`entry and quota coexist with ${nested ? "wrapped" : "direct"} scroll and ${quotaFirst ? "quota" : "entry"} mounted first`, async () => {
@@ -93,8 +199,8 @@ for (const nested of [false, true]) {
   }
 }
 
-test("the combined sidebar rejects unknown siblings and incorrectly positioned owned cards", () => {
-  const dom = fixture(false);
+for (const nested of [false, true]) test(`the combined ${nested ? "wrapped" : "direct"} sidebar rejects unknown siblings and incorrectly positioned owned cards`, () => {
+  const dom = fixture(nested);
   try {
     dom.window.eval(quotaSource);
     assert.equal(contract(dom).compatible, true);

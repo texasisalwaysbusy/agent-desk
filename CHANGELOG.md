@@ -1,30 +1,26 @@
 # Changelog / 更新日志
 
-## Unreleased maintenance candidate / 未发布维护候选
+## [1.2.3](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.3) · 2026-10-03
 
-Status reviewed 2026-10-03. These changes are in local maintenance candidates; **they are not included in the public v1.2.2 installer or public application source**.
+- Recover the workbench and quota after Scheduled/Settings navigation. Park on unsupported routes and restore the native page before an explicit reopen.
+- Open directly from existing conversations; keep the entry in its own aligned native sidebar row with matching type and a discreet arrow.
+- Cancel stale asynchronous mounts, settle preceding frame loads and require host acknowledgement before reusing a ready frame. Separate document startup, bridge handshake and load confirmation.
+- Keep real load failures visible; late blank-frame events cannot erase them. Improve bounded process observation and allow-listed diagnostics.
+- Restore approval-channel heartbeat handling and add archival handling for stale or unverifiable approval requests.
+- Add a continuous OKLab quota colour system and the selected static glass material. Length still means remaining percentage; the whole filled region has one state hue.
+- Windows x64 Release build; unsigned current-user installer with SHA256SUMS.txt. No automatic updater or installation as a publication side effect.
 
-2026-10-03 核对状态：以下属于本地维护候选，**不包含在公开 v1.2.2 安装包或应用源码中**。
+- 修复定时任务/设置切换造成的工作台与额度恢复异常；不支持的路由安全停放，返回后由用户点击入口重开。
+- 已有对话可直接打开工作台，入口独立成行、对齐原生字体和尺寸，并保留灰色小箭头。
+- 取消过时的异步挂载、等待前一帧请求结算，复用前确认宿主已完成加载；分别检查模块启动、桥握手与宿主确认。
+- 保留真实加载错误，迟到空白帧事件不能抹掉错误；改善有界进程观察与白名单诊断。
+- 修复审批通道心跳处理，支持旧的失效或无法核验详情的审批申请归档。
+- 采用连续 OKLab 额度状态颜色和选定的静态玻璃材质；长度仍表示剩余比例，整段填充使用同一状态主色。
+- Windows x64 Release 编译、未签名按用户安装，提供 SHA-256 校验文件；不自动更新或覆盖本地安装。
 
-### Candidate improvements / 候选改进
+Two field sessions on Codex 26.930.3930.0 passed the user-observed flows and normal exits. The earlier three route/remount failures did not recur. Approximately 20 minutes of idle use remained stable and the user accepted this scope. In-flight queue and natural process-observation timeout/recovery were not triggered. This is bounded acceptance, not an indefinite-stability or complete-security-audit claim. [Full bilingual notes](docs/release-1.2.3.md).
 
-- Recover the workbench entry and native sidebar quota after Scheduled/Settings navigation; improve existing-conversation mounting and entry alignment.
-- Separate child-document startup, bridge handshake and host acknowledgement during panel loading.
-- Replace blocking process observation with a bounded asynchronous check; a single observation timeout no longer immediately becomes permanent connection failure.
-- Add archival handling for stale approval requests, including requests whose original detail can no longer be verified.
-- Introduce a continuous OKLab quota colour curve and the selected static glass material; keep one state hue across the filled bar.
-
-- 改善定时任务/设置切页后的入口与额度恢复、已有对话挂载及入口对齐。
-- 分开检查子页面模块启动、桥握手和宿主确认。
-- 进程观察改为有界异步检查，单次观察超时不立即判定永久断链。
-- 为无效或无法再核验详情的旧审批申请补充归档处理。
-- 额度采用连续 OKLab 状态颜色和已选定的静态玻璃材质，整段填充保持同一状态主色。
-
-### Remaining validation / 尚未闭环
-
-The latest candidate opened the workbench from existing conversations in two field-test sessions and ran approximately 5 hours 28 minutes without a connection loss in the longer session. Three route/remount `load-failed` events still occurred and recovered on the following open. Their exact cancellation/remount cause is under investigation. The process-observation timeout/recovery branch was not naturally triggered; the second session's Codex exit value was not observed. This is not a claim of a fully fixed or audited release.
-
-最新候选两轮已有对话入口均能打开，较长一轮运行约5小时28分未断链。但切页重挂仍记录3次 `load-failed`，随后恢复，取消与重挂的确切原因仍待处理。进程观察超时恢复分支未自然触发，第二轮 Codex 退出值未观察到。因此暂不发布新的稳定安装包。
+Codex 26.930.3930.0 两轮现场使用与正常退出通过，旧的三次切页重挂错误未再出现。约20分钟静置稳定，用户确认接受本次范围。在途排队及自然进程观察超时恢复未触发；不宣称无限期稳定或完成全面安全审计。[完整发行说明](docs/release-1.2.3.md)。
 
 ## Documentation update / 产品展示更新 · 2026-10-03
 

@@ -3,6 +3,49 @@ import { validApprovalRequest } from "./handoff-approval.mjs";
 const HOST_REQUEST_ERROR = "自动认领配置暂时无法应用，请刷新后重试";
 const AUTOMATION_SCHEMA_DIAGNOSTIC = "AUTOMATION_SCHEMA_MISMATCH";
 
+// A validated document's heartbeat cannot wait for another renderer or quota
+// operation. Publications never overlap or retry after failure/disposal.
+export function createHostHeartbeatPump(publish, {
+  schedule = setTimeout, cancel = clearTimeout, intervalMs = 2000,
+} = {}) {
+  let generation = 0;
+  let running = false;
+  let timer = null;
+  let pending = null;
+  const tick = (current) => {
+    if (!running || current !== generation) return;
+    timer = null;
+    const publication = Promise.resolve().then(() => {
+      if (running && current === generation) return publish();
+    });
+    pending = publication;
+    void publication.then(() => {
+      if (pending === publication) pending = null;
+      if (!running || current !== generation) return;
+      timer = schedule(() => tick(current), intervalMs);
+      timer?.unref?.();
+    }, () => {
+      if (pending === publication) pending = null;
+      if (current === generation) running = false;
+    });
+  };
+  return {
+    start() {
+      if (running) return;
+      running = true;
+      const current = ++generation;
+      if (pending) void pending.then(() => tick(current), () => tick(current));
+      else tick(current);
+    },
+    stop() {
+      running = false;
+      generation++;
+      if (timer !== null) cancel(timer);
+      timer = null;
+    },
+  };
+}
+
 function parseHostRequest(payload, parseAutomationRequest) {
   if (typeof payload !== "string" || payload.length > 4_194_304) {
     return { id: null, request: null, error: HOST_REQUEST_ERROR };

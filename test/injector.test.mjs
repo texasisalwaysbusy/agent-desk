@@ -633,6 +633,10 @@ function startupHarness({ compatible = true, entryMounted = true } = {}) {
     source.indexOf("async function injectAll("));
   const run = vm.runInNewContext(`(${targetSource})`, {
     logLaunchDiagnostic() {},
+    rendererOrdinal: 0,
+    emitQuotaTrace() {},
+    emitWorkbenchTrace() {},
+    createQuotaObserver: () => ({ dispose() {}, mark() {}, capture() {} }),
     probeRendererContract: async () => ({ compatible, capabilities: {
       fullPanel: compatible, quotaDisplay: compatible, taskNavigation: compatible,
     } }),

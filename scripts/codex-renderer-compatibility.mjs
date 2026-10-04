@@ -8,16 +8,18 @@ const rendererContractProbeExpression = String.raw`(() => {
   const appProtocol = window.location.protocol === "app:";
   const topFrame = window.top === window;
   const visibleSidebar = (candidate) => {
-    if (!candidate || candidate.closest('[inert], [aria-hidden="true"]')) return false;
+    if (!candidate || candidate.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
     const style = getComputedStyle(candidate);
     const rect = candidate.getBoundingClientRect();
     return style.display !== "none" && style.visibility !== "hidden"
       && rect.width >= 160 && rect.height >= 180;
   };
+  const visibleFlow = (candidate) => candidate && !candidate.closest('[hidden], [inert], [aria-hidden="true"]')
+    && getComputedStyle(candidate).display !== "none" && getComputedStyle(candidate).visibility !== "hidden"
+    && candidate.getBoundingClientRect().width >= 100;
   const legacyScrolls = Array.from(document.querySelectorAll(
     "[data-app-action-sidebar-scroll]",
-  )).filter((candidate) => visibleSidebar(candidate.closest("aside"))
-    && candidate.getBoundingClientRect().width >= 100);
+  )).filter((candidate) => visibleSidebar(candidate.closest("aside")) && visibleFlow(candidate));
   const legacyScroll = legacyScrolls.length === 1 ? legacyScrolls[0] : null;
   const modernSidebars = Array.from(document.querySelectorAll(
     'aside[data-app-shell-left-panel-appearance]',
@@ -25,18 +27,18 @@ const rendererContractProbeExpression = String.raw`(() => {
   const modernSidebar = modernSidebars.length === 1 ? modernSidebars[0] : null;
   const modernNavigations = Array.from(modernSidebar?.querySelectorAll(
     'nav[role="navigation"][aria-label]',
-  ) || []);
+  ) || []).filter(visibleFlow);
   const modernNavigation = modernNavigations.length === 1 ? modernNavigations[0] : null;
-  const modernScrolls = Array.from(modernNavigation?.querySelectorAll("div.overflow-y-auto") || []);
+  const modernScrolls = Array.from(modernNavigation?.querySelectorAll("div.overflow-y-auto") || []).filter(visibleFlow);
   const modernScroll = modernScrolls.length === 1 ? modernScrolls[0] : null;
   const ambiguousSidebars = legacyScrolls.length > 1 || modernSidebars.length > 1
     || (legacyScroll && modernSidebar && !modernSidebar.contains(legacyScroll));
   const sidebarScroll = ambiguousSidebars ? null
     : legacyScroll || (modernSidebar?.contains(modernScroll) ? modernScroll : null);
   const sidebar = legacyScroll?.closest("aside") || modernSidebar;
-  const viewport = document.querySelector(
-    'main[data-app-shell-main-surface="default"] [data-app-shell-main-content-layout]',
-  ) || document.querySelector("[data-app-shell-main-content-layout]");
+  const viewport = document.querySelector("main[data-app-shell-main-content-layout]")
+    || document.querySelector('main[data-app-shell-main-surface="default"] [data-app-shell-main-content-layout]')
+    || document.querySelector("main [data-app-shell-main-content-layout]");
   const directFrameHost = document.querySelector(".app-shell-main-content-frame");
   let frameHost = directFrameHost?.closest?.("[data-app-shell-main-content-layout]")
     ? directFrameHost
@@ -55,7 +57,7 @@ const rendererContractProbeExpression = String.raw`(() => {
         && rect.height >= viewportRect.height * 0.7;
     }) || null;
   }
-  const surface = viewport?.parentElement || null;
+  const surface = viewport?.matches("main") ? viewport : viewport?.parentElement || null;
   const pageMount = Boolean(
     frameHost
     && viewport
@@ -82,16 +84,22 @@ const rendererContractProbeExpression = String.raw`(() => {
   const scrollHosts = modernNavigation && modernScroll
     ? Array.from(modernNavigation.children).filter((child) => child.contains(modernScroll)) : [];
   const scrollHost = scrollHosts.length === 1 ? scrollHosts[0] : null;
-  // A direct native scroller gains our own adjacent quota section. It is not a
+  // The unique native scroll host gains our own adjacent quota section. It is not a
   // new native navigation section; ignore only its exact owner and position.
-  const nativeNavigationChildren = Array.from(modernNavigation?.children || []).filter((child) => !(
+  const nativeNavigationChildren = Array.from(modernNavigation?.children || []).filter(visibleFlow).filter((child) => !(
     child.tagName === "SECTION" && child.id === "codex-taskboard-quota-display"
     && child.getAttribute("data-codex-taskboard-owned") === "quota-display"
-    && child.previousElementSibling === modernScroll
-    && modernScroll?.parentElement === modernNavigation
+    && scrollHost && child.previousElementSibling === scrollHost
+    && scrollHost.parentElement === modernNavigation
+  ) && !(
+    child.tagName === "BUTTON" && child.id === "codex-taskboard-entry"
+    && child.getAttribute("data-codex-taskboard-owned") === "true"
+    && child.getAttribute("data-codex-taskboard-entry-layout") === "navigation"
+    && scrollHost && child.nextElementSibling === scrollHost
+    && document.querySelectorAll("#codex-taskboard-entry").length === 1
   ));
   const headerHost = nativeNavigationChildren.length === 2
-    && scrollHost?.previousElementSibling === nativeNavigationChildren[0]
+    && nativeNavigationChildren[1] === scrollHost
     ? nativeNavigationChildren[0] : null;
   const headerButtons = headerHost
     ? Array.from(headerHost.querySelectorAll("button.sidebar-item"))

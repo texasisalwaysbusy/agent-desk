@@ -3,6 +3,7 @@ import { requestApproval, type ApprovalDetail, type ApprovalItem, type ApprovalO
 
 const labels: Record<string, string> = { pending: "待审批", approved: "已批准 · 等待继续", succeeded: "已完成", running: "执行中",
   failed: "执行失败", revoked: "已撤销 / 已退回", outdated: "协议已更新", invalid: "无法核验",
+  expired: "已过期", cancelled: "已取消",
   approve: "批准", reject: "拒绝", return: "退回修改", revoke: "撤销授权" };
 const riskLabels: Record<string, string> = {
   "Shell/interpreter can perform arbitrary effects": "命令解释器可以执行多种操作，影响需要人工复核。",
@@ -25,6 +26,7 @@ export function ApprovalCenter({ challenge, project }: { challenge: string; proj
   const [items, setItems] = useState<ApprovalItem[]>([]);
   const [detail, setDetail] = useState<ApprovalDetail | null>(null);
   const [selected, setSelected] = useState("");
+  const [summary, setSummary] = useState<ApprovalItem | null>(null);
   const [filter, setFilter] = useState("pending");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -46,7 +48,7 @@ export function ApprovalCenter({ challenge, project }: { challenge: string; proj
     finally { if (gen === generation.current) setBusy(false); }
   }
   useEffect(() => {
-    generation.current++; setDetail(null); setSelected(""); setReviewed([]); setReason(""); setItems([]);
+    generation.current++; setDetail(null); setSummary(null); setSelected(""); setReviewed([]); setReason(""); setItems([]);
     void refresh();
     return () => { generation.current++; };
   }, [challenge, activeProject]);
@@ -54,12 +56,28 @@ export function ApprovalCenter({ challenge, project }: { challenge: string; proj
   async function open(item: ApprovalItem) {
     if (busy || mutation.current) return;
     const gen = generation.current;
-    setSelected(item.id); setDetail(null); setReviewed([]); setReason(""); setError(""); setNotice(""); setBusy(true);
+    setSelected(item.id); setSummary(item); setDetail(null); setReviewed([]); setReason(""); setError(""); setNotice("");
+    if (item.state === "invalid") return;
+    setBusy(true);
     try {
       const result = await requestApproval<ApprovalDetail>(challenge, { operation: "detail", messageId: item.id });
       if (gen === generation.current) setDetail(result);
     } catch (e) { if (gen === generation.current) setError((e as Error).message); }
     finally { if (gen === generation.current) setBusy(false); }
+  }
+
+  async function archiveItem(event: React.MouseEvent<HTMLButtonElement>, item: ApprovalItem) {
+    if (!event.isTrusted || busy || mutation.current || item.state === "running") return;
+    const gen = generation.current;
+    mutation.current = true; setBusy(true); setError("");
+    try {
+      await requestApproval(challenge, { operation: item.archived ? "unarchive" : "archive", messageId: item.id });
+      if (gen !== generation.current) return;
+      setDetail(null); setSummary(null); setSelected("");
+      await refresh();
+      if (gen === generation.current) setNotice("已整理显示。原记录保留；归档不会撤销授权、执行命令或终止进程。");
+    } catch (e) { if (gen === generation.current) setError((e as Error).message); }
+    finally { mutation.current = false; if (gen === generation.current) setBusy(false); }
   }
 
   async function decide(event: React.MouseEvent<HTMLButtonElement>, decision: string) {
@@ -80,12 +98,15 @@ export function ApprovalCenter({ challenge, project }: { challenge: string; proj
   const allPending = status?.operations.every((op) => op.state === "pending");
   const risks = Object.entries(status?.risk_findings ?? {}).filter(([, reasons]) => reasons.length > 0).map(([id]) => id);
   const canApprove = status?.protocol_current && !status.revoked_at && allPending && !status.approved_at;
-  const visible = items.filter((item) => filter === "all" || item.state === "pending");
+  const pendingItems = items.filter((item) => !item.archived && item.state === "pending");
+  const archivedItems = items.filter((item) => item.archived);
+  const visible = filter === "archived" ? archivedItems : filter === "all" ? items.filter((item) => !item.archived) : pendingItems;
+  const selectedItem = items.find((item) => item.id === selected) || summary;
 
   return <section className="approval-center" aria-label="审批中心">
     <header className="approval-heading">
       <div><h2>审批中心</h2><p>审阅代理交接的具体操作，再决定是否允许执行。</p></div>
-      <button className="button secondary" disabled={busy} onClick={() => { setDetail(null); void refresh(); }}>刷新</button>
+      <button className="button secondary" disabled={busy} onClick={() => { setDetail(null); setSummary(null); setSelected(""); void refresh(); }}>刷新</button>
     </header>
     <div className="approval-heading" aria-label="审批范围">
       <span>审批范围：{activeProject === null ? "全部已接入项目" : activeProject === undefined ? "尚未选择" : "当前项目"}</span>
@@ -97,14 +118,15 @@ export function ApprovalCenter({ challenge, project }: { challenge: string; proj
     {notice && <div className="approval-notice" role="status">{notice}</div>}
     <div className="approval-layout">
       <aside className="approval-inbox">
-        <div className="view-tabs"><button disabled={!loaded} className={`view-tab${filter === "pending" ? " active" : ""}`} onClick={() => setFilter("pending")}>待审批 · {loaded ? items.filter((x) => x.state === "pending").length : "未查询"}</button><button disabled={!loaded} className={`view-tab${filter === "all" ? " active" : ""}`} onClick={() => setFilter("all")}>全部记录</button></div>
+        <div className="view-tabs"><button disabled={!loaded} className={`view-tab${filter === "pending" ? " active" : ""}`} onClick={() => setFilter("pending")}>待审批 · {loaded ? pendingItems.length : "未查询"}</button><button disabled={!loaded} className={`view-tab${filter === "all" ? " active" : ""}`} onClick={() => setFilter("all")}>当前记录</button><button disabled={!loaded} className={`view-tab${filter === "archived" ? " active" : ""}`} onClick={() => setFilter("archived")}>已归档 · {loaded ? archivedItems.length : "未查询"}</button></div>
         {!visible.length && <p className="approval-empty">{busy ? "正在读取…" : !loaded ? error ? "读取未完成，请刷新重试" : "选择审批范围后显示申请" : "没有符合条件的申请"}</p>}
-        {visible.map((item) => <button key={item.id} disabled={busy || item.state === "invalid"} className={`approval-inbox-item${selected === item.id ? " selected" : ""}`} onClick={() => void open(item)}>
+        {visible.map((item) => <button key={item.id} disabled={busy} className={`approval-inbox-item${selected === item.id ? " selected" : ""}`} onClick={() => void open(item)}>
           <span className="approval-state">{labels[item.state] || item.state}</span><strong>{item.objective}</strong>
           <small>{item.sender} → {item.receiver} · {item.task_id}</small>
         </button>)}
       </aside>
       <article className="approval-detail" aria-busy={busy}>
+        {selectedItem && <section className="approval-notice"><strong>{selectedItem.objective}</strong><p>{selectedItem.archived ? "已归档，可恢复到当前记录。" : "不再需要或无法打开的旧申请可从待办归档。"}原申请、人工决定和执行记录均保留。归档只整理显示，不撤销仍有效的授权；需要停止未执行操作时请先使用撤销授权。</p><button className="button secondary" disabled={busy || selectedItem.state === "running"} onClick={(event) => void archiveItem(event, selectedItem)}>{selectedItem.archived ? "恢复到当前记录" : "归档此申请"}</button>{selectedItem.state !== "invalid" && <button className="button secondary" disabled={busy} onClick={() => void open(selectedItem)}>核对执行结果</button>}{selectedItem.state === "invalid" && <p>此申请无法核验，仅显示列表摘要，不能批准或执行。</p>}</section>}
         {!detail || !status ? <div className="approval-empty"><h3>先了解影响，再作决定</h3><p>{busy ? "正在核对任务与执行记录…" : "选择左侧申请，查看中文说明、风险和执行结果。"}</p><p>收件和任务认领都不代表已经批准。</p></div> : <>
           <span className="approval-eyebrow">申请方声明 · 仍需核验</span>
           <h2>{status.package.objective}</h2><p className="approval-scope">{status.package.scope}</p>

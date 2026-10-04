@@ -123,6 +123,8 @@ test("startup diagnostic file persists only allow-listed launch fields", () => {
 });
 
 test("Windows helper processes stay headless while Codex may create its GUI window", () => {
+  assert.match(launcherSource, /^#!\[cfg_attr\(target_os = "windows", windows_subsystem = "windows"\)\]/);
+  assert.doesNotMatch(launcherSource, /cfg_attr\(not\(debug_assertions\), windows_subsystem/);
   assert.match(launcherSource, /const CREATE_NO_WINDOW: u32 = 0x08000000/);
   assert.match(launcherSource, /fn hidden_windows_command\(program: &str\) -> StdCommand/);
   assert.match(launcherSource, /command\.creation_flags\(CREATE_NO_WINDOW\)/);
@@ -199,6 +201,22 @@ test("normal shutdown stops without relaunch and auxiliary failures cannot demot
   assert.equal(launcherSource.match(/snapshot\.phase != "running"/g)?.length, 2);
   assert.match(launcherSource, /rendererReloadRejected/);
   assert.match(injectorSource, /const exitCode = cdpRuntime\?\.exitCode\?\.\(\) \?\? codexProcess\?\.exitCode/);
+});
+
+test("start refusals are recorded before returning and instance conflicts inform the user", () => {
+  const lockBranch = launcherSource.slice(launcherSource.indexOf("let Some(instance_lock)"),
+    launcherSource.indexOf("let version = app.package_info()"));
+  assert.match(lockBranch, /append_launcher_start_refusal\(&log_directory, "instance-already-running", None\)/);
+  assert.match(lockBranch, /\.message\("Agent Desk 已在运行/);
+  assert.ok(lockBranch.indexOf("blocking_show") < lockBranch.indexOf("app.handle().exit(0)"));
+  const codexBranch = launcherSource.slice(launcherSource.indexOf("if let Some(codex_pid) = ordinary_codex_pid"),
+    launcherSource.indexOf("stop_recorded_child(state);", launcherSource.indexOf("if let Some(codex_pid) = ordinary_codex_pid")));
+  assert.match(codexBranch, /append_launcher_start_refusal\(directory, "codex-running", Some\(codex_pid\)\)/);
+  assert.doesNotMatch(codexBranch, /terminate_process|Stop-Process|taskkill/);
+  assert.match(injectorSource, /logLaunchDiagnostic\(reason === "codex-running" \? "activation-refused" : "activation-failed"/);
+  assert.doesNotMatch(injectorSource, /logLaunchDiagnostic\("codex-exited", \{ pid: codexPid, exitCode: 0 \}\)/);
+  assert.match(injectorSource, /exitCodeSource: "registered-process-handle"/);
+  assert.match(injectorSource, /logLaunchDiagnostic\("codex-observation-stopping"/);
 });
 
 test("the Windows installer is current-user and never claims release signing", async () => {

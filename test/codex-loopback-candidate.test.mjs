@@ -10,11 +10,60 @@ import {
   reserveLoopbackPort,
   validateLoopbackTarget,
   watchRegisteredProcess,
+  inspectLoopbackProcess,
 } from "../scripts/codex-cdp-loopback-candidate.mjs";
 
 test("the source candidate refuses activation without the explicit Windows opt-in", () => {
   assert.throws(() => activateRegisteredCodex({ port: 9233, appPath: "ignored" }),
     /explicit source-test opt-in/);
+});
+
+test("activation refusal keeps its reason and drops raw helper output", { skip: process.platform !== "win32" }, () => {
+  const previous = process.env.AGENT_DESK_WINDOWS_TRANSPORT;
+  process.env.AGENT_DESK_WINDOWS_TRANSPORT = "registered-loopback";
+  try {
+    for (const [stdout, expected] of [
+      ['{"activationFailure":"codex-running"}\r\n', "codex-running"],
+      ['{"activationFailure":"codex-running","activationStage":"selection"}', "codex-running"],
+      ["private path or exception", "activation-failed"],
+    ]) {
+      assert.throws(() => activateRegisteredCodex({ port: 9233, appPath: "fixture", mode: "launcher" }, {
+        run: () => { throw Object.assign(new Error("secret-error"), { stdout, stderr: "secret-stderr" }); },
+      }), (error) => {
+        assert.equal(error.diagnosticReason, expected);
+        assert.doesNotMatch(error.message, /secret|private/);
+        return true;
+      });
+    }
+  } finally {
+    if (previous === undefined) delete process.env.AGENT_DESK_WINDOWS_TRANSPORT;
+    else process.env.AGENT_DESK_WINDOWS_TRANSPORT = previous;
+  }
+});
+
+test("activation failure retains only fixed stage and reason markers", { skip: process.platform !== "win32" }, () => {
+  const previous = process.env.AGENT_DESK_WINDOWS_TRANSPORT;
+  process.env.AGENT_DESK_WINDOWS_TRANSPORT = "registered-loopback";
+  try {
+    for (const [marker, expectedReason, expectedStage] of [
+      [{ activationFailure: "process-path-unavailable", activationStage: "process-validation" }, "process-path-unavailable", "process-validation"],
+      [{ activationFailure: "listener-misowned", activationStage: "listener-validation" }, "listener-misowned", "listener-validation"],
+      [{ activationFailure: "private-path", activationStage: "private-error" }, undefined, undefined],
+      [{ activationFailure: "path-mismatch", activationStage: "process-validation", raw: "private-error" }, undefined, undefined],
+    ]) {
+      assert.throws(() => activateRegisteredCodex({ port: 9233, appPath: "fixture", mode: "launcher" }, {
+        run: () => { throw Object.assign(new Error("private-error"), { stdout: JSON.stringify(marker) }); },
+      }), (error) => {
+        assert.equal(error.activationReason, expectedReason);
+        assert.equal(error.activationStage, expectedStage);
+        assert.doesNotMatch(error.message, /private/);
+        return true;
+      });
+    }
+  } finally {
+    if (previous === undefined) delete process.env.AGENT_DESK_WINDOWS_TRANSPORT;
+    else process.env.AGENT_DESK_WINDOWS_TRANSPORT = previous;
+  }
 });
 
 test("the candidate accepts only an exact loopback page target", () => {
@@ -189,4 +238,67 @@ test("an observation helper failure remains unknown and stops discovery", async 
   const runtime = createLoopbackCandidateRuntime(41415, 123, { processObserver: observer });
   assert.equal(runtime.isHealthy(), false);
   runtime.close();
+});
+
+test("slow listener observation yields to heartbeats and one timeout defers all new authority", async () => {
+  let ticks = 0, count = 0, fetched = 0, connected = 0;
+  const events = [];
+  const timer = setInterval(() => ticks++, 5);
+  const runtime = createLoopbackCandidateRuntime(41415, 123, {
+    inspect: async () => {
+      await new Promise(r => setTimeout(r, 40));
+      if (++count === 1) throw Object.assign(new Error("private helper output"), { code: "ETIMEDOUT" });
+      return { processAlive: true, listenerOwned: true };
+    },
+    onObservation: s => events.push(s),
+    fetchTargets: async () => { fetched++; return { ok:true, json: async()=>[target] }; },
+    connectSocket: () => { connected++; return { ready:Promise.resolve(), close(){} }; },
+  });
+  try {
+    await assert.rejects(runtime.targets(), /discovery deferred/);
+    assert.ok(ticks >= 1, "an independent heartbeat timer ran before observation completed");
+    assert.equal(fetched, 0); assert.equal(connected, 0); assert.equal(runtime.isHealthy(), true);
+    assert.equal((await runtime.targets()).length, 1); await runtime.connect(target);
+    assert.equal(fetched, 1); assert.equal(connected, 1);
+    assert.deepEqual(events.map(s=>s.observation), ["timeout","recovered"]);
+    assert.doesNotMatch(JSON.stringify(events), /private/);
+  } finally {clearInterval(timer); runtime.close();}
+});
+
+test("three observation timeouts stop rather than reuse cached ownership; shutdown invalidates pending inspection", async () => {
+  const runtime = createLoopbackCandidateRuntime(41415,123,{
+    inspect:async()=>{throw Object.assign(new Error("private"),{code:"ETIMEDOUT"});},
+    fetchTargets:()=>assert.fail("unknown listener"), connectSocket:()=>assert.fail("unknown listener"),
+  });
+  await assert.rejects(runtime.targets(), /deferred/);
+  await assert.rejects(runtime.connect(target), /deferred/);
+  assert.equal(runtime.isHealthy(),true);
+  await assert.rejects(runtime.targets(), /unavailable/); assert.equal(runtime.isHealthy(),false);
+  await assert.rejects(runtime.connect(target), /unavailable/); runtime.close();
+  let release;
+  const closing = createLoopbackCandidateRuntime(41415,123,{
+    inspect:()=>new Promise(r=>release=r), fetchTargets:()=>assert.fail("closed runtime"),
+  });
+  const pending=closing.targets(); closing.close(); release({processAlive:true,listenerOwned:true});
+  await assert.rejects(pending,/closed/);
+});
+
+test("ownership loss after uncertainty remains terminal even if a later observation would recover", async () => {
+  let count=0;
+  const runtime=createLoopbackCandidateRuntime(41415,123,{
+    inspect:async()=>{if(++count===1)throw Object.assign(new Error(),{code:"ETIMEDOUT"});return {processAlive:true,listenerOwned:count>2};},
+    fetchTargets:()=>assert.fail("misowned listener"), connectSocket:()=>assert.fail("misowned listener"),
+  });
+  await assert.rejects(runtime.targets(),/deferred/); await assert.rejects(runtime.connect(target),/ownership changed/);
+  await assert.rejects(runtime.targets(),/ownership changed/);assert.equal(count,2);runtime.close();
+});
+
+test("asynchronous PowerShell observation has bounded output, hides windows and redacts errors", async () => {
+  let progressed=false;
+  const result=await inspectLoopbackProcess(41415,123,{run:(program,args,options,callback)=>{
+    assert.equal(options.windowsHide,true);assert.equal(options.timeout,5000);assert.equal(options.maxBuffer,4096);
+    setTimeout(()=>{progressed=true;callback(null,'{"processAlive":true,"listenerOwned":true}');},10);
+  }});
+  assert.equal(progressed,true);assert.equal(result.listenerOwned,true);
+  await assert.rejects(inspectLoopbackProcess(41415,123,{run:(_p,_a,_o,cb)=>cb(Object.assign(new Error("private"),{killed:true}),"private")}),e=>e.code==='ETIMEDOUT'&&!e.message.includes('private'));
 });

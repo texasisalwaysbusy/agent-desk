@@ -3,6 +3,7 @@ import { postEmbeddedHostMessage } from "./embeddedHost.mjs";
 export interface ApprovalItem {
   id: string; task_id: string; project: string; sender: string; receiver: string;
   session: string; objective: string; state: string;
+  archived?: boolean; archiveAutomatic?: boolean;
 }
 export interface ApprovalOperation {
   id: string; argv: string[]; cwd: string; inputs: Record<string, string>;

@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.6.15";
+  const VERSION = "0.6.21";
   const SOURCE_HASH = window.__CODEX_TASKBOARD_SOURCE_HASH__;
   const SENTINEL_KEY = "__codexTaskboardInjection__";
   const DEFAULT_TASKBOARD_URL = "http://127.0.0.1:47823/?host=codex";
@@ -58,6 +58,7 @@
   } catch (_) {}
 
   let entry = null;
+  let entryReference = null;
   let page = null;
   let frame = null;
   let dragRegion = null;
@@ -92,6 +93,17 @@
   let suspendedNativeBrowserPanel = null;
   let active = false;
   let destroyed = false;
+  let workbenchSequence = 0;
+  let workbenchFingerprint = "";
+  const workbenchTrace = [];
+  let lastLoadFailure = "none";
+  let mountState = "parked";
+  let frameLoadEvents = 0;
+  let frameAwaitingChallenge = false;
+  let frameLoadAcknowledged = false;
+  let loadStage = "idle";
+  let parkReason = "none";
+  let framePreparation = null;
 
   function normalizedLabel(value) {
     return String(value || "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -159,6 +171,38 @@
     style.id = STYLE_ID;
     style.setAttribute(OWNED_ATTRIBUTE, "true");
     style.textContent = `
+      #${ENTRY_ID} {
+        box-sizing: border-box !important;
+        position: static !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        flex: 0 0 var(--agent-desk-entry-height, 32px) !important;
+        height: var(--agent-desk-entry-height, 32px) !important;
+        min-height: var(--agent-desk-entry-height, 32px) !important;
+        max-height: var(--agent-desk-entry-height, 32px) !important;
+        width: 100%;
+        min-width: 0;
+        max-width: 100%;
+        padding: 4px var(--agent-desk-entry-padding, 8px) !important;
+        border: 0 !important;
+        border-radius: 10px;
+        background: transparent;
+        color: var(--color-token-foreground, CanvasText);
+        font-family: var(--agent-desk-entry-font-family, inherit);
+        font-size: var(--agent-desk-entry-font-size, 14px);
+        font-weight: var(--agent-desk-entry-font-weight, 400);
+        line-height: var(--agent-desk-entry-line-height, 20px);
+        letter-spacing: var(--agent-desk-entry-letter-spacing, normal);
+        cursor: pointer;
+        gap: var(--agent-desk-entry-gap, 8px);
+        overflow: hidden !important;
+        -webkit-app-region: no-drag;
+      }
+      #${ENTRY_ID}:hover { background: var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent)); }
+      #${ENTRY_ID} > svg { width: var(--agent-desk-entry-icon, 18px); height: var(--agent-desk-entry-icon, 18px); flex: 0 0 var(--agent-desk-entry-icon, 18px); }
+      #${ENTRY_ID} > .entry-chevron { width:12px; height:12px; flex:0 0 12px; margin-left:auto; color:var(--color-token-description-foreground, currentColor); opacity:.55; }
+      #${ENTRY_ID} > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #${ENTRY_ID}[aria-current="page"] {
         background: var(--color-token-list-hover-background, color-mix(in srgb, currentColor 8%, transparent));
         color: var(--color-token-foreground, inherit);
@@ -166,6 +210,23 @@
       #${ENTRY_ID}:focus-visible {
         outline: 2px solid var(--color-token-border, Highlight);
         outline-offset: 2px;
+      }
+      #${ENTRY_ID}[hidden] {
+        display: none !important;
+      }
+      #${ENTRY_ID}[data-codex-taskboard-entry-layout="navigation"]:not([hidden]) {
+        box-sizing: border-box !important;
+        display: flex !important;
+        align-self: stretch !important;
+        width: calc(100% - 16px) !important;
+        max-width: calc(100% - 16px) !important;
+        min-width: 0 !important;
+        margin: 4px 8px !important;
+        gap: var(--agent-desk-entry-gap, 8px);
+        justify-content: flex-start;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis;
       }
       [${HOST_ATTRIBUTE}="true"] {
         position: relative !important;
@@ -188,7 +249,7 @@
         right: 0;
         bottom: 0;
         left: 0;
-        z-index: 1;
+        z-index: 3;
         min-width: 0;
         min-height: 0;
         overflow: hidden;
@@ -211,7 +272,7 @@
       }
       #${DRAG_REGION_ID} {
         position: absolute;
-        z-index: 2;
+        z-index: 4;
         background: transparent;
         pointer-events: none;
         -webkit-app-region: drag;
@@ -219,7 +280,7 @@
       #${NO_DRAG_LEFT_ID},
       #${NO_DRAG_RIGHT_ID} {
         position: absolute;
-        z-index: 2;
+        z-index: 4;
         background: transparent;
         pointer-events: none;
         -webkit-app-region: no-drag;
@@ -261,9 +322,15 @@
     return labels.includes(text);
   }
 
+  function visibleNativeFlow(candidate) {
+    return candidate && !candidate.closest('[hidden], [inert], [aria-hidden="true"]')
+      && getComputedStyle(candidate).display !== "none" && getComputedStyle(candidate).visibility !== "hidden"
+      && candidate.getBoundingClientRect().width >= 100;
+  }
+
   function findReferenceButton() {
     const visibleSidebar = (candidate) => {
-      if (!candidate || candidate.closest('[inert], [aria-hidden="true"]')) return false;
+      if (!candidate || candidate.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
       const style = getComputedStyle(candidate);
       const rect = candidate.getBoundingClientRect();
       return style.display !== "none" && style.visibility !== "hidden"
@@ -271,8 +338,7 @@
     };
     const legacyScrolls = Array.from(document.querySelectorAll(
       "[data-app-action-sidebar-scroll]",
-    )).filter((candidate) => visibleSidebar(candidate.closest("aside"))
-      && candidate.getBoundingClientRect().width >= 100);
+    )).filter((candidate) => visibleSidebar(candidate.closest("aside")) && visibleNativeFlow(candidate));
     if (legacyScrolls.length > 1) return null;
     const scroll = legacyScrolls[0] || null;
     const sidebars = Array.from(document.querySelectorAll(
@@ -283,9 +349,9 @@
     const sidebar = sidebars.length === 1 ? sidebars[0] : null;
     const navigations = Array.from(sidebar?.querySelectorAll(
       'nav[role="navigation"][aria-label]',
-    ) || []);
+    ) || []).filter(visibleNativeFlow);
     const navigation = navigations.length === 1 ? navigations[0] : null;
-    const modernScrolls = Array.from(navigation?.querySelectorAll("div.overflow-y-auto") || []);
+    const modernScrolls = Array.from(navigation?.querySelectorAll("div.overflow-y-auto") || []).filter(visibleNativeFlow);
     const modernScroll = modernScrolls.length === 1 ? modernScrolls[0] : null;
     const modernReference = modernScroll?.querySelector(
       "button.sidebar-item, a.sidebar-item[href]",
@@ -295,7 +361,7 @@
     const scrollHost = scrollHosts.length === 1 ? scrollHosts[0] : null;
     const nativeChildren = nativeNavigationChildren(navigation, modernScroll);
     const headerHost = nativeChildren.length === 2
-      && scrollHost?.previousElementSibling === nativeChildren[0]
+      && nativeChildren[1] === scrollHost
       ? nativeChildren[0] : null;
     const headerButtons = headerHost
       ? Array.from(headerHost.querySelectorAll("button.sidebar-item"))
@@ -324,28 +390,36 @@
   }
 
   function nativeNavigationChildren(navigation, scroll) {
-    return Array.from(navigation?.children || []).filter((child) => !(
+    const scrollHosts = Array.from(navigation?.children || []).filter((child) => child.contains(scroll));
+    const scrollHost = scrollHosts.length === 1 ? scrollHosts[0] : null;
+    return Array.from(navigation?.children || []).filter(visibleNativeFlow).filter((child) => !(
       child.tagName === "SECTION" && child.id === "codex-taskboard-quota-display"
       && child.getAttribute(OWNED_ATTRIBUTE) === "quota-display"
-      && child.previousElementSibling === scroll && scroll?.parentElement === navigation
+      && scrollHost && child.previousElementSibling === scrollHost && scrollHost.parentElement === navigation
+    ) && !(
+      child.tagName === "BUTTON" && child.id === ENTRY_ID
+      && child.getAttribute(OWNED_ATTRIBUTE) === "true"
+      && child.getAttribute("data-codex-taskboard-entry-layout") === "navigation"
+      && scrollHost && child.nextElementSibling === scrollHost
+      && document.querySelectorAll(`#${ENTRY_ID}`).length === 1
     ));
   }
 
   function headerMountForReference(reference) {
     const navigation = reference?.closest('nav[role="navigation"][aria-label]');
-    const scrolls = Array.from(navigation?.querySelectorAll("div.overflow-y-auto") || []);
+    const scrolls = Array.from(navigation?.querySelectorAll("div.overflow-y-auto") || []).filter(visibleNativeFlow);
     const nativeChildren = nativeNavigationChildren(navigation, scrolls[0]);
     if (!navigation || scrolls.length !== 1 || nativeChildren.length !== 2) return null;
     const scrollHost = Array.from(navigation.children)
       .filter((child) => child.contains(scrolls[0]));
     const headerHost = nativeChildren[0];
-    if (scrollHost.length !== 1 || scrollHost[0].previousElementSibling !== headerHost
+    if (scrollHost.length !== 1 || nativeChildren[1] !== scrollHost[0]
       || !headerHost?.contains(reference)) return null;
     const nativeButtons = Array.from(headerHost.querySelectorAll("button.sidebar-item"))
       .filter((button) => !(button.id === ENTRY_ID
         && button.getAttribute(OWNED_ATTRIBUTE) === "true"));
     return nativeButtons.length === 1 && nativeButtons[0] === reference
-      ? { navigation, scrollHost: scrollHost[0] } : null;
+      ? { navigation, scrollHost: scrollHost[0], headerHost } : null;
   }
 
   function replaceEntryIcon(button) {
@@ -363,13 +437,23 @@
     `;
   }
 
-  function createEntry(reference) {
-    const button = reference.tagName === "A" ? document.createElement("button")
-      : reference.cloneNode(true);
-    if (reference.tagName === "A") {
-      button.className = reference.className;
-      button.append(...Array.from(reference.childNodes, (node) => node.cloneNode(true)));
-    }
+  function createEntry() {
+    // Native action classes/inline styles are contextual (e.g. height:100%).
+    // A separate row owns its markup and sizing, never clones action attributes.
+    const button = document.createElement("button");
+    const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    icon.setAttribute("aria-hidden", "true");
+    entryLabel = document.createElement("span");
+    button.append(icon, entryLabel);
+    const chevron = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    chevron.setAttribute("class", "entry-chevron");
+    chevron.setAttribute("viewBox", "0 0 16 16");
+    chevron.setAttribute("fill", "none");
+    chevron.setAttribute("stroke", "currentColor");
+    chevron.setAttribute("stroke-width", "1.5");
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.innerHTML = '<path d="m6 4 4 4-4 4" stroke-linecap="round" stroke-linejoin="round" />';
+    button.append(chevron);
     button.id = ENTRY_ID;
     button.type = "button";
     button.removeAttribute("disabled");
@@ -378,9 +462,6 @@
     button.removeAttribute("aria-describedby");
     button.removeAttribute("data-state");
     button.setAttribute(OWNED_ATTRIBUTE, "true");
-    button.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
-    entryLabel = button.querySelector(".text-fade-truncate")
-      || Array.from(button.querySelectorAll("span")).find((node) => buttonMatches(node, PLUGIN_LABELS));
     syncEntryText(button);
     replaceEntryIcon(button);
     button.addEventListener("click", (event) => {
@@ -412,41 +493,100 @@
     if (destroyed || !document.body) return;
     installStyles();
     const reference = findReferenceButton();
-    if (!reference?.parentElement) return;
-    if (!entry) entry = createEntry(reference);
+    if (!reference?.parentElement) {
+      if (entry && !entry.hidden) entry.hidden = true;
+      return;
+    }
+    if (entry?.hidden) entry.hidden = false;
+    entryReference = reference;
+    if (!entry) entry = createEntry();
+    syncEntryAppearance(reference);
     const headerMount = headerMountForReference(reference);
-    if (headerMount) entry.classList.add("w-full");
-    if (entry.parentElement !== reference.parentElement
-      || entry.previousElementSibling !== reference) {
-      reference.after(entry);
+    if (headerMount) {
+      // New Chat's container may be a horizontal action row. Our button occupies
+      // its own navigation row without restyling the native container.
+      entry.setAttribute("data-codex-taskboard-entry-layout", "navigation");
+      entry.style.setProperty("order", getComputedStyle(headerMount.headerHost).order, "important");
+      if (entry.parentElement !== headerMount.navigation || entry.nextElementSibling !== headerMount.scrollHost) {
+        headerMount.scrollHost.before(entry);
+      }
+    } else {
+      entry.removeAttribute("data-codex-taskboard-entry-layout");
+      entry.style.removeProperty("order");
+      if (entry.parentElement !== reference.parentElement || entry.previousElementSibling !== reference) {
+        reference.after(entry);
+      }
     }
     syncEntryState();
   }
 
-  function findPageHost() {
-    const direct = document.querySelector(".app-shell-main-content-frame");
-    if (direct?.closest?.("[data-app-shell-main-content-layout]")) return direct;
+  function syncEntryAppearance(reference) {
+    const label = reference.querySelector(".text-fade-truncate,span") || reference;
+    const font = getComputedStyle(label), buttonStyle = getComputedStyle(reference);
+    const icon = reference.querySelector("svg"), iconRect = icon?.getBoundingClientRect();
+    const navRect = reference.closest('nav[role="navigation"]')?.getBoundingClientRect();
+    const padding = iconRect?.width > 0 && navRect
+      ? iconRect.left - navRect.left - 8 : parseFloat(buttonStyle.paddingLeft) || 8;
+    const labelRect = label.getBoundingClientRect();
+    const gap = iconRect?.width > 0 && label !== reference ? labelRect.left - iconRect.right : 8;
+    const values = {
+      height: `${Math.max(28, Math.min(40, reference.getBoundingClientRect().height || 32))}px`,
+      padding: `${Math.max(4, Math.min(24, padding))}px`,
+      icon: `${Math.max(14, Math.min(20, iconRect?.width || 18))}px`,
+      gap: `${Math.max(4, Math.min(12, gap || 8))}px`,
+      "font-family": font.fontFamily || "inherit", "font-size": font.fontSize || "14px",
+      "font-weight": font.fontWeight || "400", "line-height": font.lineHeight || "20px",
+      "letter-spacing": font.letterSpacing || "normal",
+    };
+    for (const [key, value] of Object.entries(values)) {
+      const property = `--agent-desk-entry-${key}`;
+      if (entry.style.getPropertyValue(property) !== value) entry.style.setProperty(property, value);
+    }
+  }
 
-    const viewport = document.querySelector(
-      'main[data-app-shell-main-surface="default"] [data-app-shell-main-content-layout]',
-    ) || document.querySelector("[data-app-shell-main-content-layout]");
-    if (!viewport) return null;
+  function findPageHost() {
+    // Native routes can retain a connected, hidden previous surface. Connectivity
+    // alone cannot select the current page. Ignore only our own suppression.
+    const available = (node) => {
+      if (node.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+      for (let parent = node; parent; parent = parent.parentElement) {
+        const style = getComputedStyle(parent);
+        if (style.display === "none") return false;
+        if (style.visibility === "hidden" && !parent.closest(`[${HIDDEN_ATTRIBUTE}="true"]`)) return false;
+      }
+      const rect = node.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    const direct = Array.from(document.querySelectorAll(".app-shell-main-content-frame"))
+      .filter((node) => node.closest("main[data-app-shell-main-content-layout], main [data-app-shell-main-content-layout]") && available(node));
+    if (direct.length) return direct.length === 1 ? direct[0] : null;
+
+    const viewports = Array.from(document.querySelectorAll(
+      "main[data-app-shell-main-content-layout], main [data-app-shell-main-content-layout]",
+    )).filter(available);
+    if (viewports.length !== 1) return null;
+    const viewport = viewports[0];
     const focusHosts = Array.from(viewport.children).filter((candidate) => (
-      candidate.querySelector('[data-app-shell-focus-area="main"]')
+      available(candidate) && candidate.querySelector('[data-app-shell-focus-area="main"]')
     ));
     if (focusHosts.length === 1) return focusHosts[0];
     const viewportRect = viewport.getBoundingClientRect();
-    return Array.from(viewport.children).find((candidate) => {
+    const candidates = Array.from(viewport.children).filter((candidate) => {
+      if (candidate.getAttribute(OWNED_ATTRIBUTE) === "true") return false;
+      if (!available(candidate)) return false;
       const rect = candidate.getBoundingClientRect();
       return rect.width >= viewportRect.width * 0.8
         && rect.height >= viewportRect.height * 0.7;
-    }) || null;
+    });
+    return candidates.length === 1 ? candidates[0] : null;
   }
 
   function findPageMount() {
     const frameHost = findPageHost();
     const viewport = frameHost?.closest?.("[data-app-shell-main-content-layout]");
-    const surface = viewport?.parentElement;
+    // Some conversation routes put the layout marker on main itself. Mount
+    // inside that validated main, never in its unvalidated outer ancestor.
+    const surface = viewport?.matches("main") ? viewport : viewport?.parentElement;
     if (!frameHost || !viewport || !surface || !surface.closest("main")) return null;
     return { frameHost, surface };
   }
@@ -479,7 +619,7 @@
     document.querySelectorAll('[data-testid="app-shell-header-context-menu-surface"]')
       .forEach((surface) => {
         Array.from(surface.children).forEach((child) => {
-          if (child.getAttribute(OWNED_ATTRIBUTE) !== "true") {
+          if (child.getAttribute(OWNED_ATTRIBUTE) !== "true" && !child.contains(page)) {
             child.setAttribute(HIDDEN_ATTRIBUTE, "true");
           }
         });
@@ -489,7 +629,7 @@
         const header = surface.closest("header[data-app-shell-header-layout]");
         header?.querySelectorAll("[data-app-shell-header-obstacle]").forEach((child) => {
           if (child.closest("header[data-app-shell-header-layout]") === header
-            && !child.closest(`[${OWNED_ATTRIBUTE}="true"]`)) {
+            && !child.closest(`[${OWNED_ATTRIBUTE}="true"]`) && !child.contains(page)) {
             child.setAttribute(HIDDEN_ATTRIBUTE, "true");
           }
         });
@@ -1372,14 +1512,16 @@
 
   function challengeFrameDocument(event) {
     if (!frame || event.currentTarget !== frame) return;
+    frameLoadEvents = Math.min(frameLoadEvents + 1, 1000);
     frameReady = false;
     frameChallenge = crypto.randomUUID();
-    if (active) showLoading();
+    if (active && statusView !== "error" && continuePreparation(openGeneration)) showLoading();
+    recordWorkbenchState();
     postFrameChallenge();
   }
 
   function onFrameMessage(event) {
-    if (!frame || event.source !== frame.contentWindow || event.origin !== frameOrigin) return;
+    if (!frame?.isConnected || event.source !== frame.contentWindow || event.origin !== frameOrigin) return;
     const message = event.data;
     if (
       !message
@@ -1388,11 +1530,14 @@
       || message.capability !== frameCapability
     ) return;
     if (message.type === "taskboard:frame-awaiting-challenge") {
+      if (statusView === "error") return;
+      frameAwaitingChallenge = true;
       postFrameChallenge();
       return;
     }
     if (!frameChallenge || message.challenge !== frameChallenge) return;
     if (message.type === "taskboard:ready") {
+      if (statusView === "error") return;
       if (frameReady) return;
       frameReady = true;
       frameReadyWaiters.forEach(({ resolve, timer }) => {
@@ -1400,7 +1545,7 @@
         resolve();
       });
       frameReadyWaiters.clear();
-      if (active) showFrame();
+      if (active && frameLoadAcknowledged && continuePreparation(openGeneration)) showFrame();
       postHostContext();
       return;
     }
@@ -1507,7 +1652,9 @@
   function showLoading() {
     statusView = "loading";
     loadError = null;
+    lastLoadFailure = "none";
     renderLoading();
+    recordWorkbenchState();
   }
 
   function renderLoading() {
@@ -1525,12 +1672,38 @@
       frame.hidden = false;
       frame.focus?.();
     }
+    lastLoadFailure = "none";
+    recordWorkbenchState();
   }
 
   function showLoadError(error) {
     statusView = "error";
     loadError = error;
     renderLoadError();
+    lastLoadFailure = error?.diagnosticCode === "frame-timeout" ? "frame-timeout" : "load-failed";
+    recordWorkbenchState();
+  }
+
+  function currentWorkbenchMount() {
+    // A main layout can survive after its Codex sidebar has changed routes.
+    // Both structural anchors must be available before hiding native content.
+    if (!findReferenceButton()) return null;
+    return findPageMount();
+  }
+
+  function continuePreparation(generation) {
+    if (!active || generation !== openGeneration) return false;
+    const mount = currentWorkbenchMount();
+    if (!mount || page?.parentElement !== mount.surface || !page?.isConnected || page.hidden) {
+      parkForRoute();
+      return false;
+    }
+    return true;
+  }
+
+  function parkForRoute() {
+    parkReason = "route-unavailable";
+    closeTaskboard(false);
   }
 
   function renderLoadError() {
@@ -1575,14 +1748,16 @@
         reject,
         timer: window.setTimeout(() => {
           frameReadyWaiters.delete(waiter);
-          reject(hostError("任务面板页面加载超时", "Taskboard page load timed out"));
+          const error = hostError("任务面板页面加载超时", "Taskboard page load timed out");
+          error.diagnosticCode = "frame-timeout";
+          reject(error);
         }, FRAME_READY_TIMEOUT_MS),
       };
       frameReadyWaiters.add(waiter);
     });
   }
 
-  function loadTaskboardFrame(cacheBust = false) {
+  function resetTaskboardFrame() {
     cancelFrameReadyWaiters(hostError("任务面板正在重新加载", "Taskboard is reloading"));
     frame?.remove();
     frame = null;
@@ -1590,9 +1765,16 @@
     frameCapability = "";
     frameChallenge = "";
     frameReady = false;
+    frameLoadEvents = 0;
+    frameAwaitingChallenge = false;
+    frameLoadAcknowledged = false;
     if (dragRegion) dragRegion.hidden = true;
     if (noDragLeft) noDragLeft.hidden = true;
     if (noDragRight) noDragRight.hidden = true;
+  }
+
+  function loadTaskboardFrame(cacheBust = false) {
+    resetTaskboardFrame();
 
     const taskboardUrl = resolveTaskboardUrl();
     if (cacheBust) {
@@ -1603,6 +1785,9 @@
     frameOrigin = "null";
     const frameName = `codex-taskboard-${crypto.randomUUID()}`;
     frameCapability = crypto.randomUUID();
+    // A CDP document replacement can finish before the initial blank load event.
+    // Establish this fresh frame's challenge before its first awaiting message.
+    frameChallenge = crypto.randomUUID();
     const nextFrame = document.createElement("iframe");
     nextFrame.id = FRAME_ID;
     nextFrame.name = frameName;
@@ -1615,23 +1800,23 @@
     nextFrame.addEventListener("load", challengeFrameDocument);
     frame = nextFrame;
     page.appendChild(nextFrame);
+    recordWorkbenchState();
     return { frameName, frameCapability };
   }
 
   function reloadFrame() {
-    if (!frame) return false;
+    if (!frame || !active || !continuePreparation(openGeneration)) return false;
     const generation = ++openGeneration;
-    if (active) showLoading();
-    const frameRequest = loadTaskboardFrame(true);
-    void requestHostLoadFrame(frameRequest)
-      .then(() => waitForFrameReady())
+    showLoading();
+    void prepareFrame(generation, true)
       .then(() => {
-          if (!active || generation !== openGeneration) return;
+          if (!continuePreparation(generation)) return;
+          loadStage = "ready";
           showFrame();
           postHostContext();
       })
       .catch((error) => {
-        if (!active || generation !== openGeneration) return;
+        if (!continuePreparation(generation)) return;
         showLoadError(error);
       });
     return true;
@@ -1657,6 +1842,12 @@
 
   function requestHost(action, payload = {}, timeoutMs = HOST_REQUEST_TIMEOUT_MS) {
     if (!hasLiveHostBinding()) {
+      if (action === "handoff-approval") {
+        return Promise.reject(hostError(
+          "审批通道未连接，请从 Agent Desk 托盘打开 Codex，再刷新审批中心核对状态",
+          "The approval channel is disconnected. Open Codex from the Agent Desk tray, then refresh the approval center to check its state",
+        ));
+      }
       return Promise.reject(hostError(
         "Taskboard 启动器未运行，无法操作 Codex 对话输入框",
         "The Taskboard launcher is not running, so the Codex composer is unavailable",
@@ -1669,7 +1860,9 @@
         ? null
         : window.setTimeout(() => {
           hostRequests.delete(id);
-          const error = hostError("任务面板启动器没有响应", "The Taskboard launcher did not respond");
+          const error = action === "handoff-approval"
+            ? hostError("审批通道没有响应，请刷新核对状态；不要重复提交", "The approval channel did not respond. Refresh to check its state; do not submit again")
+            : hostError("任务面板启动器没有响应", "The Taskboard launcher did not respond");
           if (action === "start-task-conversation") error.uncertain = true;
           reject(error);
         }, timeoutMs);
@@ -1697,6 +1890,29 @@
 
   function requestHostLoadFrame({ frameName, frameCapability: capability }) {
     return requestHost("load-frame", { frameName, frameCapability: capability });
+  }
+
+  async function prepareFrame(generation, cacheBust = false) {
+    // A superseded host bootstrap must restore CSP before another is issued.
+    // Wait for its settlement; do not retry it or accept its old authority.
+    while (framePreparation) {
+      loadStage = "queued";
+      recordWorkbenchState();
+      try { await framePreparation; } catch (_) {}
+      if (!continuePreparation(generation)) return;
+    }
+    if (!continuePreparation(generation)) return;
+    loadStage = "bootstrap";
+    const frameRequest = loadTaskboardFrame(cacheBust);
+    const pending = requestHostLoadFrame(frameRequest);
+    framePreparation = pending;
+    try { await pending; }
+    finally { if (framePreparation === pending) framePreparation = null; }
+    if (!continuePreparation(generation)) return;
+    frameLoadAcknowledged = true;
+    loadStage = "handshake";
+    recordWorkbenchState();
+    await waitForFrameReady();
   }
 
   function frameMatchesTaskboardUrl(taskboardUrl) {
@@ -1742,9 +1958,11 @@
   }
 
   async function prepareTaskboard(generation) {
+    if (!continuePreparation(generation)) return;
     const taskboardUrl = resolveTaskboardUrl();
     const canReuseFrame = Boolean(
       frameReady
+      && frameLoadAcknowledged
       && frame?.isConnected
       && frameMatchesTaskboardUrl(taskboardUrl),
     );
@@ -1752,29 +1970,28 @@
     else showLoading();
 
     try {
-      const [result, context] = await Promise.all([
-        requestHostEnsure(taskboardUrl),
-        captureHostContext(),
-      ]);
-      if (!active || generation !== openGeneration) return;
-      hostContextSnapshot = {
-        ...hostContextSnapshot,
-        ...context,
-        projects: context.projects.length > 0
-          ? context.projects
-          : hostContextSnapshot?.projects ?? [],
-      };
-      if (!frameReady || result.restarted || !frameMatchesTaskboardUrl(taskboardUrl)) {
+      // Native project metadata is supplemental. Slow or failed queries must not
+      // gate a usable panel; late data can only update the current open generation.
+      void captureHostContext().then((context) => {
+        if (!active || generation !== openGeneration) return;
+        hostContextSnapshot = { ...hostContextSnapshot, ...context,
+          projects: context.projects.length > 0 ? context.projects : hostContextSnapshot?.projects ?? [] };
+        postHostContext();
+      }, () => {});
+      loadStage = "ensure";
+      recordWorkbenchState();
+      const result = await requestHostEnsure(taskboardUrl);
+      if (!continuePreparation(generation)) return;
+      if (!frameReady || !frameLoadAcknowledged || !frame?.isConnected || result.restarted || !frameMatchesTaskboardUrl(taskboardUrl)) {
         showLoading();
-        const frameRequest = loadTaskboardFrame();
-        await requestHostLoadFrame(frameRequest);
-        await waitForFrameReady();
+        await prepareFrame(generation);
       }
-      if (!active || generation !== openGeneration) return;
+      if (!continuePreparation(generation)) return;
+      loadStage = "ready";
       showFrame();
       postHostContext();
     } catch (error) {
-      if (!active || generation !== openGeneration) return;
+      if (!continuePreparation(generation)) return;
       const bindingAvailable = hasLiveHostBinding();
       showLoadError(bindingAvailable
         ? error
@@ -1830,12 +2047,16 @@
 
   function mountActivePage() {
     if (!active) return;
+    const mount = currentWorkbenchMount();
+    if (!mount) { parkForRoute(); return; }
     if (!page) page = createPage();
-    const mount = findPageMount();
-    if (!mount) return;
     const { surface } = mount;
 
+    const frameReset = page.parentElement !== surface && Boolean(frame);
     if (page.parentElement !== surface) {
+      // Moving a subtree reloads its iframe browsing context to about:blank.
+      // Drop its old capability/readiness before moving; load only a fresh frame.
+      if (frameReset) resetTaskboardFrame();
       restoreNativeContent();
       surface.appendChild(page);
     }
@@ -1848,13 +2069,20 @@
     hideNativeHeader();
     muteNativeSelection();
     page.hidden = false;
+    mountState = "mounted";
     document.documentElement.setAttribute("data-codex-taskboard-open", "true");
+    return frameReset;
   }
 
   function closeTaskboard(restoreFocus = true) {
     if (!active && page?.hidden !== false) return;
     openGeneration += 1;
     active = false;
+    mountState = "parked";
+    loadStage = "idle";
+    statusView = "idle";
+    lastLoadFailure = "none";
+    cancelFrameReadyWaiters(hostError("任务面板已关闭", "Taskboard was closed"));
     if (page) page.hidden = true;
     restoreNativeContent();
     restoreNativeBrowserPanel();
@@ -1864,10 +2092,12 @@
     if (restoreFocus) lastFocusedElement?.focus?.();
     lastFocusedElement = null;
     hostContextSnapshot = null;
+    recordWorkbenchState();
   }
 
   function openTaskboard() {
     if (destroyed) return;
+    parkReason = "none";
     if (!active) {
       lastFocusedElement = document.activeElement;
       hostContextSnapshot = readHostContext();
@@ -1877,7 +2107,20 @@
     closeNativeBrowserPanel();
     ensureEntry();
     mountActivePage();
+    if (mountState !== "mounted") {
+      // Never reuse a ready frame in a hidden previous route. Retain native
+      // content and report the structural refusal on our own entry only.
+      closeTaskboard(false);
+      mountState = "unavailable";
+      statusView = "error";
+      lastLoadFailure = "mount-unavailable";
+      if (entry) entry.title = hostText("当前页面缺少可用的工作台挂载位置，请稍后重试", "No workbench mount is available on this page; try again later");
+      recordWorkbenchState();
+      return;
+    }
+    if (entry) entry.removeAttribute("title");
     syncEntryState();
+    recordWorkbenchState();
     void prepareTaskboard(generation);
   }
 
@@ -1910,14 +2153,16 @@
     reattachTimer = window.setTimeout(() => {
       reattachTimer = null;
       ensureEntry();
-      mountActivePage();
+      const frameReset = mountActivePage();
+      if (frameReset) void prepareTaskboard(++openGeneration);
       postHostContext();
     }, REATTACH_DELAY_MS);
   }
 
   function refresh() {
     ensureEntry();
-    mountActivePage();
+    const frameReset = mountActivePage();
+    if (frameReset) void prepareTaskboard(++openGeneration);
     postHostContext();
   }
 
@@ -1937,6 +2182,7 @@
         "data-app-action-sidebar-thread-active",
         "aria-label",
         "aria-current",
+        "hidden", "inert", "aria-hidden", "role", "data-app-shell-left-panel-appearance",
       ],
     });
     hostContextTimer = window.setInterval(postHostContext, 1_000);
@@ -1946,6 +2192,7 @@
   function destroy() {
     if (destroyed) return;
     destroyed = true;
+    recordWorkbenchState();
     if (reattachTimer !== null) window.clearTimeout(reattachTimer);
     reattachTimer = null;
     if (hostContextTimer !== null) window.clearInterval(hostContextTimer);
@@ -1969,6 +2216,7 @@
     closeTaskboard(false);
     document.querySelectorAll(`[${OWNED_ATTRIBUTE}="true"]`).forEach((node) => node.remove());
     entry = null;
+    entryReference = null;
     entryLabel = null;
     page = null;
     frame = null;
@@ -1986,6 +2234,66 @@
     if (active) closeTaskboard(false);
   }
 
+  function recordWorkbenchState() {
+    const entryRect = entry?.getBoundingClientRect();
+    const referenceRect = entryReference?.getBoundingClientRect();
+    const visibility = (node) => {
+      if (!node?.isConnected) return "disconnected";
+      if (node.hidden) return "hidden";
+      if (node.closest('[hidden], [inert], [aria-hidden="true"]')) return "native-hidden";
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return "zero-size";
+      let depth = 0;
+      for (let parent = node; parent; parent = parent.parentElement) {
+        if (++depth > 64) return "depth-limit";
+        const style = getComputedStyle(parent), box = parent.getBoundingClientRect();
+        if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") return parent.closest(`[${HIDDEN_ATTRIBUTE}="true"]`) ? "suppressed" : "native-hidden";
+        if (["hidden", "clip", "auto", "scroll"].includes(style.overflowY)
+          && (rect.top < box.top - 1 || rect.bottom > box.bottom + 1)) return "clipped";
+        if (["hidden", "clip", "auto", "scroll"].includes(style.overflowX)
+          && (rect.left < box.left - 1 || rect.right > box.right + 1)) return "clipped";
+      }
+      return rect.bottom > 0 && rect.right > 0 && rect.top < window.innerHeight && rect.left < window.innerWidth ? "visible" : "offscreen";
+    };
+    const visible = node => visibility(node) === "visible";
+    const scroll = entry?.parentElement?.querySelector("div.overflow-y-auto");
+    const boundedSize = (value) => Number.isFinite(value) ? Math.min(32768, Math.max(0, Math.round(value))) : 0;
+    const frameBox = frame?.getBoundingClientRect();
+    const frameOccluded = Boolean(active && visible(frame) && typeof document.elementFromPoint === "function"
+      && document.elementFromPoint(frameBox.left + frameBox.width / 2, frameBox.top + frameBox.height / 2) !== frame);
+    const value = { phase: statusView, active, destroyed, frameReady,
+      frameLoadEvents, frameAwaitingChallenge, frameLoadAcknowledged,
+      pageConnected: Boolean(page?.isConnected), frameConnected: Boolean(frame?.isConnected),
+      hostBindingLive: hasLiveHostBinding(), openGeneration, failure: lastLoadFailure,
+      mountState, loadStage, parkReason, routeEligible: Boolean(currentWorkbenchMount()),
+      pageHidden: Boolean(page?.hidden), pageVisibility: visibility(page), frameVisibility: visibility(frame),
+      entryConnected: Boolean(entry?.isConnected),
+      entryHidden: Boolean(entry?.hidden),
+      entryHeight: boundedSize(entryRect?.height),
+      entryOversized: Boolean(entryRect?.height > 48),
+      entryVisible: visible(entry),
+      listUsable: Boolean(scroll?.isConnected && scroll.getBoundingClientRect().height >= 80 && visible(scroll)),
+      pageVisible: visible(page), frameVisible: visible(frame), frameOccluded,
+      entrySeparateRow: Boolean(entry?.isConnected && entryReference?.isConnected
+        && entry.getAttribute("data-codex-taskboard-entry-layout") === "navigation"
+        && entry.parentElement !== entryReference.parentElement),
+      entrySharesNativeRow: Boolean(entry?.isConnected && entryReference?.isConnected
+        && entryRect?.height > 0 && referenceRect?.height > 0
+        && Math.min(entryRect.bottom, referenceRect.bottom) > Math.max(entryRect.top, referenceRect.top) + 1) };
+    const fingerprint = JSON.stringify(value);
+    if (fingerprint === workbenchFingerprint) return;
+    workbenchFingerprint = fingerprint;
+    workbenchTrace.push({ ...value, sequence: ++workbenchSequence, atMs: Date.now() });
+    if (workbenchTrace.length > 64) workbenchTrace.shift();
+  }
+
+  function diagnostics(afterSequence = 0) {
+    recordWorkbenchState();
+    const after = Number.isSafeInteger(afterSequence) && afterSequence >= 0 ? afterSequence : 0;
+    return { schemaVersion: 1, sequence: workbenchSequence,
+      events: workbenchTrace.filter((event) => event.sequence > after).map((event) => ({ ...event })) };
+  }
+
   const api = {
     version: VERSION,
     sourceHash: SOURCE_HASH,
@@ -1997,6 +2305,7 @@
     open: openTaskboard,
     close: closeTaskboard,
     destroy,
+    diagnostics,
   };
   window[SENTINEL_KEY] = api;
 

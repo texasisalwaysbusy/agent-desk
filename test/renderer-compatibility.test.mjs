@@ -194,7 +194,7 @@ test("a native navigation link remains a valid reference when modern and legacy 
     assert.equal(result.checks.modernLink, true);
     assert.equal(result.checks.modernReferenceInChosenScroll, true);
     const referenceSource = injectionSource.slice(
-      injectionSource.indexOf("function findReferenceButton()"),
+      injectionSource.indexOf("function visibleNativeFlow("),
       injectionSource.indexOf("function replaceEntryIcon("),
     );
     const context = vm.createContext({
@@ -217,7 +217,7 @@ test("26.924 fixed-header row qualifies only with one matching navigation and sc
     assert.equal(result.shape.sameScroll, true);
     assert.equal(dom.serialize(), before);
     const referenceSource = injectionSource.slice(
-      injectionSource.indexOf("function findReferenceButton()"),
+      injectionSource.indexOf("function visibleNativeFlow("),
       injectionSource.indexOf("function replaceEntryIcon("),
     );
     const context = vm.createContext({
@@ -250,7 +250,7 @@ test("hidden old navigation cannot displace the visible updated sidebar", () => 
     const result = normalizeRendererContractProbe(probe(dom));
     assert.equal(result.compatible, true);
     const referenceSource = injectionSource.slice(
-      injectionSource.indexOf("function findReferenceButton()"),
+      injectionSource.indexOf("function visibleNativeFlow("),
       injectionSource.indexOf("function replaceEntryIcon("),
     );
     const context = vm.createContext({
@@ -268,7 +268,7 @@ test("updated Codex entry and page mount use the same validated anchors", () => 
   const dom = updatedFixture();
   try {
     const referenceSource = injectionSource.slice(
-      injectionSource.indexOf("function findReferenceButton()"),
+      injectionSource.indexOf("function visibleNativeFlow("),
       injectionSource.indexOf("function replaceEntryIcon("),
     );
     const pageSource = injectionSource.slice(
@@ -395,6 +395,7 @@ test("an initial contract failure retains only a read-only observer without Page
   const inject = vm.runInNewContext(`(${fnSource})`, {
     probeRendererContract: async () => normalizeRendererContractProbe(null),
     logLaunchDiagnostic() {},
+    rendererOrdinal: 0,
   });
   const result = await inject({ connect: async () => cdp }, {}, false, null, true, {}, false, null,
     { mode: "contract-probe" });

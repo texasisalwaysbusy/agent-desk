@@ -34,3 +34,31 @@ it("returns from all-project review to the exact selected project", async () => 
   fireEvent.click(screen.getByRole("button", { name: "仅查看当前项目" }));
   await waitFor(() => expect(requestApproval).toHaveBeenLastCalledWith("fixture", { operation: "list", project }));
 });
+
+it("keeps archived invalid requests accessible without preparing them and exposes reversible cleanup", async () => {
+  vi.mocked(requestApproval).mockResolvedValue({ items: [
+    { id: "invalid-fixture", objective: "旧损坏申请", state: "invalid", archived: true },
+    { id: "pending-fixture", objective: "当前申请", state: "pending", archived: false },
+  ] });
+  render(<ApprovalCenter challenge="fixture" project={null} />);
+  expect(await screen.findByText("当前申请")).toBeTruthy();
+  expect(screen.queryByText("旧损坏申请")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "已归档 · 1" }));
+  fireEvent.click(await screen.findByRole("button", { name: /旧损坏申请/ }));
+  expect(screen.getByRole("button", { name: "恢复到当前记录" })).toBeTruthy();
+  expect(screen.getByText(/此申请无法核验/)).toBeTruthy();
+  expect(requestApproval).toHaveBeenCalledTimes(1);
+  expect(screen.queryByRole("button", { name: "批准本次任务" })).toBeNull();
+});
+
+it("allows an unreadable pending request to be archived from its list summary", async () => {
+  vi.mocked(requestApproval).mockImplementation(async (_challenge, request) => {
+    if (request.operation === "detail") throw new Error("程序或输入文件变化");
+    return { items: [{ id: "old-fixture", objective: "过期候选申请", state: "pending" }] } as never;
+  });
+  render(<ApprovalCenter challenge="fixture" project={null} />);
+  fireEvent.click(await screen.findByRole("button", { name: /过期候选申请/ }));
+  expect(await screen.findByRole("alert")).toHaveProperty("textContent", "程序或输入文件变化");
+  expect(screen.getByRole("button", { name: "归档此申请" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "批准本次任务" })).toBeNull();
+});

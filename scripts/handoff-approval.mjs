@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { createHmac, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
+import { createApprovalArchive } from "./approval-archive.mjs";
 
 export function validApprovalRequest(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -11,6 +12,7 @@ export function validApprovalRequest(value) {
     || (typeof value.project === "string" && value.project.length <= 4096 && path.isAbsolute(value.project));
   if (typeof value.messageId !== "string" || !/^[a-f0-9-]{36}$/i.test(value.messageId)) return false;
   if (value.operation === "detail") return true;
+  if (["archive", "unarchive"].includes(value.operation)) return Object.keys(value).every((key) => ["operation", "messageId"].includes(key));
   return value.operation === "decide"
     && typeof value.revision === "string" && /^[a-f0-9]{64}$/.test(value.revision)
     && ["approve", "reject", "return", "revoke"].includes(value.decision)
@@ -21,6 +23,7 @@ export function validApprovalRequest(value) {
 
 export function createApprovalAdapter(configPath) {
   let active = 0;
+  const archive = createApprovalArchive(path.join(path.dirname(configPath), "approval-archive.json"));
   return async (request) => {
     if (!validApprovalRequest(request)) throw new Error("无效的审批请求");
     if (active >= 4) throw new Error("审批中心正忙，请稍后重试");
@@ -37,9 +40,11 @@ export function createApprovalAdapter(configPath) {
         throw new Error("审批中心本地配置不兼容");
       }
       const key = randomBytes(32).toString("hex");
-      const body = JSON.stringify({ mailbox: config.mailbox, projects: config.projects, request });
+      const viewChange = ["archive", "unarchive"].includes(request.operation);
+      const adapterRequest = viewChange ? { operation: "list", project: null } : request;
+      const body = JSON.stringify({ mailbox: config.mailbox, projects: config.projects, request: adapterRequest });
       const packet = JSON.stringify({ body, mac: createHmac("sha256", key).update(body).digest("hex") });
-      return await new Promise((resolve, reject) => {
+      const result = await new Promise((resolve, reject) => {
         const env = { AGENT_DESK_PRIVATE_PIPE_KEY: key };
         for (const name of ["SystemRoot", "WINDIR", "TEMP", "TMP"]) if (process.env[name]) env[name] = process.env[name];
         const child = spawn(config.python, ["-I", "-X", "utf8", "-m", "handoff_mcp.desktop"], {
@@ -68,6 +73,9 @@ export function createApprovalAdapter(configPath) {
         });
         child.stdin.end(`${packet}\n`);
       });
+      if (viewChange) return await archive.set(request.messageId, request.operation === "archive", result.items);
+      if (request.operation === "list") return { ...result, items: await archive.decorate(result.items) };
+      return result;
     } finally { active--; }
   };
 }

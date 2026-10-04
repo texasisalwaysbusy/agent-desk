@@ -1,24 +1,28 @@
 # Known issues and release status / 已知问题与版本状态
 
-Reviewed 2026-10-03. Public stable download: **v1.2.2**, published 2026-09-28. Local maintenance candidates are not that download. No new stable version is being declared by this documentation update.
+Reviewed 2026-10-03. Stable release: **v1.2.3**. No remaining user-visible regression was confirmed in the accepted field matrix. This is not a guarantee that no bugs exist.
 
-核对日期2026-10-03。公开稳定下载仍为2026-09-28发布的 **v1.2.2**。本地维护候选与此下载不同，本次文档更新不宣布新的稳定版。
+核对日期2026-10-03，正式版 **v1.2.3**。已验收矩阵中没有确认仍存在的用户可见回归，不等于保证不存在任何bug。
 
-## Maintenance candidate findings / 维护候选结果
+## Observed scope / 已验收范围
 
-- Existing-conversation entry opened successfully in two recent field sessions; Scheduled/Settings/sidebar transitions were exercised.
-- Three transient route/remount `load-failed` events remain; the following open restored the panel. Cancellation versus failed document startup still needs a precise resolution.
-- The longer session ran approximately 5 hours 28 minutes without observed connection loss. That does not establish indefinite stability or cover every timeout-recovery branch.
-- The first session recorded a real process-handle exit value of zero. The second recorded observer shutdown and cleanup; the Codex exit value remains unknown.
-- Event logs record changes, not a periodic heartbeat. An unchanged log tail alone does not prove a stopped observer.
+Two sessions on Codex 26.930.3930.0 exercised existing-conversation entry, New Chat comparison, Scheduled/Settings return, sidebar/layout changes and quota recovery. The previous three route/remount load failures did not recur. Both normal exits have real process-handle exitCode=0. Approximately 20 minutes of idle use remained stable; the user accepted the observed period and existing records.
 
-已有对话入口在两轮现场测试中均成功打开，相关切页已测试。但3次重挂加载错误尚未闭环，后续打开可恢复。5小时28分未断链是本次观察结果，不代表无限稳定或所有超时分支通过。第二轮只确认观察器关闭与清理，真实 Codex 退出值未知。事件日志按变化记录，不是周期心跳。
+Codex 26.930.3930.0 两轮覆盖已有对话入口、新聊天对照、定时任务/设置返回、侧栏布局与额度恢复。此前三次重挂加载失败本轮未出现，两次正常退出均有真实进程句柄退出码0。约20分钟静置稳定，用户接受这段观察及现有记录。
 
-## Compatibility and setup / 兼容与配置
+## Limits and setup / 范围与配置
 
-The public runtime's installed acceptance used Codex 26.924.2738.0. Later candidate testing used 26.928.3736.0. New client versions must pass the renderer contract; compatibility cannot be inferred from the version number alone. Approval-center execution needs the separate local receiver integration and its human approval flow. No complete security audit is claimed.
+- Diagnostics are bounded change records, not continuous heartbeats. One session reached the workbench trace limit; external machine recording did not cover the entire final submission interval. Preserve those limits when interpreting the accepted user observations.
+- In-flight queued loading and natural process-observation timeout/recovery were not triggered in this matrix. No indefinite stability or full security audit is claimed.
+- New Codex documents and versions must pass the bundled renderer contract. Version numbers alone do not establish compatibility.
+- Approval execution requires the separately configured local receiver and actual human approval. Archiving a stale request never approves or executes it.
+- The installer is unsigned. Automatic updates are disabled; updating does not migrate data or configure the receiver automatically.
 
-公开实现的安装验收环境为 Codex 26.924.2738.0，后续候选测试环境为26.928.3736.0。新客户端必须通过结构契约，不能只看版本号推断兼容。审批执行需要单独配置本地接收端及真人审批流程；本项目没有宣称完成全面安全审计。
+- 诊断是有界的状态变化记录，不是连续心跳。一轮到达工作台记录上限；外部机器采样没有覆盖完整最终提交区间。解释已验收的用户观察时保留这些边界。
+- 本矩阵未自然触发在途排队加载或进程观察超时恢复，不宣称无限期稳定或完成全面安全审计。
+- 新客户端/文档必须通过随包结构契约，不能仅凭版本号推断兼容。
+- 审批执行需要独立配置接收端及真人批准；归档失效申请不代表批准或执行。
+- 安装包未签名，自动更新关闭；更新不会自动迁移数据或配置审批接收端。
 
 ## Reporting a problem / 问题反馈
 

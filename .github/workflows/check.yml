@@ -47,9 +47,85 @@ jobs:
         run: npm test
       - name: Build the unsigned current-user NSIS installer
         run: npm run app:build:windows
+      - name: Verify installer payload and packaged CLI
+        shell: pwsh
+        run: |
+          param([string]$OutputDirectory = 'dist/ci-release-verification')
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath package.json -Raw | ConvertFrom-Json).version
+          if ($version -ne '1.2.3') { throw 'Expected approved 1.2.3 product version.' }
+          $installer = Join-Path (Get-Location) 'src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/Agent Desk_1.2.3_x64-setup.exe'
+          $folder = [IO.Path]::GetFullPath((Join-Path (Get-Location) $OutputDirectory))
+          if (!$folder.StartsWith([IO.Path]::GetFullPath((Get-Location).Path).TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'Verification must remain in this workspace.' }
+          if (Test-Path -LiteralPath $folder) { throw 'Use a fresh verification directory.' }
+          New-Item -ItemType Directory -Path $folder | Out-Null
+          & 'C:/Program Files/7-Zip/7z.exe' x $installer "-o$folder/extracted" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Extraction failed.' }
+          $resourceRoot = Join-Path (Get-Location) 'src-tauri/resources'
+          $count = 0
+          foreach ($file in Get-ChildItem -LiteralPath $resourceRoot -File -Recurse) {
+            $relative = $file.FullName.Substring($resourceRoot.Length).TrimStart('\')
+            if ((Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath (Join-Path "$folder/extracted" $relative) -Algorithm SHA256).Hash) { throw "Resource mismatch: $relative" }
+            $count++
+          }
+          if ($count -ne 201) { throw 'Unexpected payload file count.' }
+          $launcher = Join-Path "$folder/extracted" 'agent-desk-launcher.exe'
+          $bytes = [IO.File]::ReadAllBytes($launcher)
+          $built = [IO.File]::ReadAllBytes((Join-Path (Get-Location) 'src-tauri/target/x86_64-pc-windows-msvc/release/agent-desk-launcher.exe'))
+          # Tauri temporarily patches UNK to NSS for NSIS and restores its build output.
+          # Permit exactly that marker change; compare every other byte unchanged.
+          $marker = '__TAURI_BUNDLE_TYPE_VAR_NSS'
+          $text = [Text.Encoding]::ASCII.GetString($built)
+          $originalMarker = '__TAURI_BUNDLE_TYPE_VAR_UNK'
+          $offset = $text.IndexOf($originalMarker,[StringComparison]::Ordinal)
+          if ($offset -lt 0 -or $text.IndexOf($originalMarker,$offset+1,[StringComparison]::Ordinal) -ge 0 -or [Text.Encoding]::ASCII.GetString($bytes,$offset,$marker.Length) -cne $marker) { throw 'Expected the fixed NSIS bundle marker at the original location.' }
+          $normalized = [byte[]]$bytes.Clone()
+          $replacement = [Text.Encoding]::ASCII.GetBytes('__TAURI_BUNDLE_TYPE_VAR_UNK')
+          [Array]::Copy($replacement,0,$normalized,$offset,$replacement.Length)
+          $sha = [Security.Cryptography.SHA256]::Create()
+          try {
+            if ([Convert]::ToBase64String($sha.ComputeHash($normalized)) -cne [Convert]::ToBase64String($sha.ComputeHash($built))) { throw 'Launcher mismatch outside the exact NSIS marker.' }
+          } finally { $sha.Dispose() }
+          if ((Get-FileHash -LiteralPath "$folder/extracted/node.exe" -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath 'src-tauri/binaries/node-x86_64-pc-windows-msvc.exe' -Algorithm SHA256).Hash) { throw 'Node runtime mismatch.' }
+          $pe = [BitConverter]::ToInt32($bytes,0x3c)
+          if ([BitConverter]::ToUInt32($bytes,$pe) -ne 0x4550 -or [BitConverter]::ToUInt16($bytes,$pe+24+68) -ne 2) { throw 'Expected GUI PE launcher.' }
+          if ((Get-AuthenticodeSignature -LiteralPath $installer).Status -ne 'NotSigned') { throw 'Unexpected signing state.' }
+          node scripts/verify-packaged-taskctl.mjs "$folder/extracted"
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged CLI verification failed.' }
+          $result = [ordered]@{version=$version; profile='Release'; resourceFilesMatched=$count; installerSHA256=(Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant(); installerBytes=(Get-Item -LiteralPath $installer).Length; signature='NotSigned'; packagedCLI='passed'; launcherSubsystem=2}
+          [IO.File]::WriteAllText((Join-Path $folder 'PACKAGE-VERIFICATION.json'), ($result | ConvertTo-Json) + "`n", [Text.UTF8Encoding]::new($false))
+          $result | ConvertTo-Json
       - name: Preserve the unsigned NSIS installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: windows-x64-nsis-${{ github.sha }}
-          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+          path: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
+            dist/ci-release-verification/PACKAGE-VERIFICATION.json
           if-no-files-found: error
+
+  publish-1-2-3:
+    name: Publish approved 1.2.3 only
+    if: github.event_name == 'push' && github.ref == 'refs/tags/v1.2.3' && github.repository == 'texasisalwaysbusy/agent-desk'
+    needs: [check, windows-launcher]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Publish the verified installer and checksums
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: texasisalwaysbusy/agent-desk
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'v1.2.3'
+          test "$(node -p 'require("./package.json").version')" = '1.2.3'
+          gh run download "$GITHUB_RUN_ID" --name "windows-x64-nsis-$GITHUB_SHA" --dir release-assets
+          node -e 'const fs=require("fs"),p=require("path"),c=require("crypto");function walk(d){return fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(p.join(d,e.name)):[p.join(d,e.name)])}const files=walk("release-assets"),exe=files.find(f=>p.basename(f)==="Agent Desk_1.2.3_x64-setup.exe"),meta=files.find(f=>p.basename(f)==="PACKAGE-VERIFICATION.json");if(!exe||!meta)throw Error("Missing assets");const v=JSON.parse(fs.readFileSync(meta));if(v.version!=="1.2.3"||v.profile!=="Release"||v.signature!=="NotSigned"||v.packagedCLI!=="passed"||v.resourceFilesMatched!==201||v.launcherSubsystem!==2)throw Error("Verification failed");const hash=c.createHash("sha256").update(fs.readFileSync(exe)).digest("hex");if(hash!==v.installerSHA256)throw Error("Artifact hash mismatch");const name="Agent-Desk-1.2.3-Windows-x64-setup.exe";fs.copyFileSync(exe,name);fs.writeFileSync("SHA256SUMS.txt",hash+"  "+name+"\n")'
+          sha256sum --check SHA256SUMS.txt
+          gh release create v1.2.3 Agent-Desk-1.2.3-Windows-x64-setup.exe SHA256SUMS.txt --verify-tag --title 'Agent Desk 1.2.3' --notes-file docs/release-1.2.3.md --latest

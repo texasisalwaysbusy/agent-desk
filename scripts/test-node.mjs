@@ -13,6 +13,8 @@ function collect(directory) {
 // Keep generated source snapshots outside test discovery.
 const tests = collect(resolve(root, "test")).sort();
 if (!tests.length) throw new Error("No Node tests found in test/");
-const result = spawnSync(process.execPath, ["--test", ...tests], { cwd: root, stdio: "inherit", windowsHide: true });
+// Browser/Windows process fixtures share finite host resources. Bound file
+// concurrency; keep every test and its original assertions/timeouts intact.
+const result = spawnSync(process.execPath, ["--test", "--test-concurrency=4", ...tests], { cwd: root, stdio: "inherit", windowsHide: true });
 if (result.error) throw result.error;
 process.exitCode = result.status ?? 1;

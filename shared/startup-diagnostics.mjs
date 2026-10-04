@@ -2,6 +2,8 @@ import { open } from "node:fs/promises";
 import path from "node:path";
 
 import { resolveDataRoot } from "./product-identity.mjs";
+import { sanitizeQuotaTrace } from "./quota-trace.mjs";
+import { sanitizeWorkbenchTrace } from "./workbench-trace.mjs";
 
 const maxReadBytes = 256 * 1024;
 const allowedEvents = new Set([
@@ -10,6 +12,13 @@ const allowedEvents = new Set([
   "renderer-probe-start", "renderer-contract", "renderer-timeout",
   "injection-result", "startup-failed",
   "managed-process-after-injector-exit",
+  "activation-started", "activation-ready", "activation-refused", "activation-failed",
+  "launcher-start-refused", "codex-exit-unobserved", "codex-observation-stopping",
+  "quota-trace",
+  "workbench-trace",
+  "workbench-health",
+  "process-observation",
+  "frame-bootstrap",
 ]);
 const allowedStages = new Set(["browser-version", "target-discovery"]);
 
@@ -22,6 +31,18 @@ export function sanitizeStartupDiagnostic(line) {
   }
   if (!source || !allowedEvents.has(source.event)) return null;
   const result = { event: source.event };
+  if (source.event === "quota-trace") result.trace = sanitizeQuotaTrace(source.trace);
+  if (source.event === "workbench-trace") result.trace = sanitizeWorkbenchTrace(source.trace);
+  if (source.event === "workbench-health" && ["ready", "loading", "error", "inactive"].includes(source.health)) result.health = source.health;
+  if (Number.isSafeInteger(source.renderer) && source.renderer > 0 && source.renderer <= 1000000) result.renderer = source.renderer;
+  if (["selection", "package", "activation-preparation", "activation-call", "process-validation", "listener-validation"].includes(source.activationStage)) {
+    result.activationStage = source.activationStage;
+  }
+  if (["codex-running", "mode-not-selected", "invalid-port", "package-not-found", "manifest-missing",
+    "package-identity-mismatch", "signature-invalid", "port-taken", "process-not-visible",
+    "process-path-unavailable", "path-mismatch", "listener-misowned", "listener-timeout", "helper-error"].includes(source.activationReason)) {
+    result.activationReason = source.activationReason;
+  }
   if (typeof source.at === "string" && /^\d{4}-\d\d-\d\dT[\d:.]+Z$/.test(source.at)
       && source.at.length <= 32 && Number.isFinite(Date.parse(source.at))) {
     result.at = source.at;
@@ -40,8 +61,11 @@ export function sanitizeStartupDiagnostic(line) {
   if (Number.isSafeInteger(source.pid) && source.pid > 0 && source.pid <= 0xffffffff) {
     result.pid = source.pid;
   }
-  if (Number.isInteger(source.exitCode) && source.exitCode >= -65535 && source.exitCode <= 65535) {
+  if (Number.isInteger(source.exitCode) && source.exitCode >= -2147483648 && source.exitCode <= 4294967295) {
     result.exitCode = source.exitCode;
+  }
+  if (["registered-process-handle", "child-process"].includes(source.exitCodeSource)) {
+    result.exitCodeSource = source.exitCodeSource;
   }
   for (const key of ["elapsedSeconds", "total", "pages", "appPages", "eligible"]) {
     if (Number.isInteger(source[key]) && source[key] >= 0 && source[key] <= 10_000) {
@@ -49,9 +73,14 @@ export function sanitizeStartupDiagnostic(line) {
     }
   }
   if (allowedStages.has(source.stage)) result.stage = source.stage;
+  if (["ready", "timeout", "invalidated", "contract-refused", "frame-refused", "failed", "busy"].includes(source.bootstrap)) result.bootstrap = source.bootstrap;
+  if (["timeout", "recovered", "failed"].includes(source.observation)) result.observation = source.observation;
+  if (Number.isInteger(source.observationFailures) && source.observationFailures >= 0 && source.observationFailures <= 3) result.observationFailures = source.observationFailures;
   if ([
     "before-injection", "connection-lost", "renderer-contract-mismatch",
     "invalid-probe-result", "probe-evaluation-failed", "probe-transport-failed",
+    "codex-running", "activation-failed", "instance-already-running", "process-check-failed",
+    "launcher-stopped",
   ].includes(source.reason)) result.reason = source.reason;
   if (typeof source.compatible === "boolean") result.compatible = source.compatible;
   if (source.checks && typeof source.checks === "object") {
@@ -101,12 +130,17 @@ async function readRange(filePath, position) {
   }
 }
 
-async function readRecentWithPosition(filePath, limit) {
+async function readRecentWithPosition(filePath, limit, { attemptId, latestAttempt } = {}) {
   const { text, next } = await readRange(filePath, 0);
   const lines = text.split(/\r?\n/);
   const partial = text.length > 0 && !text.endsWith("\n") ? lines.pop() : "";
+  const records = lines.map(sanitizeStartupDiagnostic).filter(Boolean);
+  const selectedAttempt = latestAttempt
+    ? records.findLast((record) => record.attemptId)?.attemptId : attemptId;
   return {
-    records: lines.map(sanitizeStartupDiagnostic).filter(Boolean).slice(-limit),
+    records: records.filter((record) => latestAttempt && !selectedAttempt
+      ? false : !selectedAttempt || record.attemptId?.toLowerCase() === selectedAttempt.toLowerCase()).slice(-limit),
+    selectedAttempt,
     position: next,
     partial,
   };
@@ -120,17 +154,24 @@ function parseOptions(args) {
   let follow = false;
   let json = false;
   let last = 30;
+  let attemptId;
+  let latestAttempt = false;
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
     if (arg === "--follow") follow = true;
     else if (arg === "--json") json = true;
+    else if (arg === "--latest-attempt") latestAttempt = true;
+    else if (arg === "--attempt" && /^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(args[index + 1] ?? "")) {
+      attemptId = args[++index].toLowerCase();
+    }
     else if (arg === "--last" && /^\d+$/.test(args[index + 1] ?? "")) {
       last = Number(args[++index]);
       if (last < 1 || last > 200) throw new Error("--last must be 1–200");
     } else if (arg === "--help") return { help: true };
     else throw new Error(`Unknown diagnostics option: ${arg}`);
   }
-  return { follow, json, last };
+  if (attemptId && latestAttempt) throw new Error("Choose --attempt or --latest-attempt, not both");
+  return { follow, json, last, attemptId, latestAttempt };
 }
 
 function printRecord(record, json, output) {
@@ -150,13 +191,13 @@ export async function runStartupDiagnostics(args, {
 } = {}) {
   const options = parseOptions(args);
   if (options.help) {
-    output.write("Usage: agentdesk diagnostics [--last 1–200] [--follow] [--json]\n");
+    output.write("Usage: agentdesk diagnostics [--last 1–200] [--attempt UUID | --latest-attempt] [--follow] [--json]\n");
     return 0;
   }
   const root = resolveDataRoot(localAppData);
   const filePath = path.join(root, "logs", "agent-desk-startup.jsonl");
-  const { records, position: initialPosition, partial: initialPartial } =
-    await readRecentWithPosition(filePath, options.last);
+  const { records, position: initialPosition, partial: initialPartial, selectedAttempt: initialAttempt } =
+    await readRecentWithPosition(filePath, options.last, options);
   for (const record of records) printRecord(record, options.json, output);
   if (!options.follow) return 0;
 
@@ -165,6 +206,7 @@ export async function runStartupDiagnostics(args, {
   process.once("SIGINT", stop);
   signal?.addEventListener("abort", stop, { once: true });
   try {
+    let selectedAttempt = initialAttempt;
     let position = initialPosition;
     let partial = initialPartial;
     while (!stopped) {
@@ -178,7 +220,11 @@ export async function runStartupDiagnostics(args, {
       if (partial.length > maxReadBytes) partial = "";
       for (const line of lines) {
         const record = sanitizeStartupDiagnostic(line);
-        if (record) printRecord(record, options.json, output);
+        if (options.latestAttempt && !selectedAttempt && record?.attemptId) selectedAttempt = record.attemptId;
+        if (record && !(options.latestAttempt && !selectedAttempt)
+          && (!selectedAttempt || record.attemptId?.toLowerCase() === selectedAttempt.toLowerCase())) {
+          printRecord(record, options.json, output);
+        }
       }
     }
   } finally {

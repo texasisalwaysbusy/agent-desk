@@ -1,4 +1,4 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSRunningApplication;
@@ -274,6 +274,21 @@ fn taskboard_listener(_state: &LauncherState) -> Result<(Option<i32>, u16), Stri
     Ok((None, port))
 }
 
+fn workbench_health(line: &str) -> Option<&'static str> {
+    let value: serde_json::Value = serde_json::from_str(line).ok()?;
+    let record = value.get("launchDiagnostic")?;
+    if record.get("event")?.as_str()? != "workbench-health" {
+        return None;
+    }
+    match record.get("health")?.as_str()? {
+        "ready" => Some("ready"),
+        "loading" => Some("loading"),
+        "error" => Some("error"),
+        "inactive" => Some("inactive"),
+        _ => None,
+    }
+}
+
 fn update_snapshot(
     app: &AppHandle,
     state: &Arc<LauncherState>,
@@ -314,6 +329,33 @@ fn append_log(state: &LauncherState, line: &str) {
             .duration_since(UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_millis());
         let _ = writeln!(file, "{timestamp_ms} {line}");
+    }
+}
+
+fn append_launcher_start_refusal(log_directory: &Path, reason: &str, pid: Option<u32>) {
+    if !matches!(
+        reason,
+        "instance-already-running" | "codex-running" | "process-check-failed"
+    ) {
+        return;
+    }
+    let mut diagnostic = serde_json::json!({
+        "atMs": SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |elapsed| elapsed.as_millis()),
+        "event": "launcher-start-refused",
+        "attemptId": Uuid::new_v4().to_string(),
+        "agentDeskVersion": env!("CARGO_PKG_VERSION"),
+        "reason": reason,
+    });
+    if let Some(pid) = pid {
+        diagnostic["pid"] = serde_json::json!(pid);
+    }
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_directory.join("agent-desk-startup.jsonl"))
+    {
+        let line = serde_json::json!({ "launchDiagnostic": diagnostic });
+        let _ = writeln!(file, "{line}");
     }
 }
 
@@ -974,6 +1016,33 @@ fn watch_launcher_output<R: std::io::Read + Send + 'static>(
                         snapshot.message = "任务面板已在现有 Codex 的浏览面板中打开。".into();
                     }
                 });
+            } else if !is_stderr && workbench_health(&line).is_some() {
+                let health = workbench_health(&line).unwrap();
+                update_snapshot(&app, &state, |snapshot| {
+                    if state.generation.load(Ordering::SeqCst) == generation
+                        && snapshot.child_pid == Some(pid)
+                    {
+                        match health {
+                            "error" => {
+                                snapshot.phase = "error".into();
+                                snapshot.message =
+                                    "工作台面板加载失败；请查看面板提示及诊断记录。".into();
+                            }
+                            "loading" => {
+                                snapshot.phase = "starting".into();
+                                snapshot.message = "Codex 已连接，正在加载工作台面板…".into();
+                            }
+                            "ready" => {
+                                snapshot.phase = "running".into();
+                                snapshot.message = "工作台面板已就绪。".into();
+                            }
+                            _ => {
+                                snapshot.phase = "running".into();
+                                snapshot.message = "Codex 已连接，工作台面板未打开。".into();
+                            }
+                        }
+                    }
+                });
             } else if !is_stderr
                 && line.contains("\"rendererInjection\":")
                 && line.contains("\"injected\":true")
@@ -1086,15 +1155,23 @@ fn start_launcher_locked(
     #[cfg(target_os = "macos")]
     let ordinary_codex_pid = ordinary_codex_process(&codex_app)?;
     #[cfg(target_os = "windows")]
-    let ordinary_codex_pid = ordinary_codex_process(&codex_app)?;
+    let ordinary_codex_pid = ordinary_codex_process(&codex_app).map_err(|error| {
+        if let Some(directory) = state.log_path.parent() {
+            append_launcher_start_refusal(directory, "process-check-failed", None);
+        }
+        error
+    })?;
     #[cfg(target_os = "linux")]
     let ordinary_codex_pid = ordinary_codex_process(&codex_app)?;
     if let Some(codex_pid) = ordinary_codex_pid {
+        if let Some(directory) = state.log_path.parent() {
+            append_launcher_start_refusal(directory, "codex-running", Some(codex_pid));
+        }
         let stale_managed_session = recorded_child_is_running(state);
         if !stale_managed_session {
             app
                 .dialog()
-                .message("Codex 已经由其他方式启动。请先在 Codex 中正常退出，然后从托盘菜单选择“重新打开 Codex”。Agent Desk 不会终止或附加到现有进程。")
+                .message("Codex 进程仍在运行。请先在 Codex 中正常退出；若刚退出，请等待数秒，然后从托盘菜单选择“重新打开 Codex”。Agent Desk 不会终止或附加到现有进程。")
                 .title("Agent Desk")
                 .kind(MessageDialogKind::Info)
                 .buttons(MessageDialogButtons::Ok)
@@ -1436,7 +1513,53 @@ fn resolve_data_root(base: &Path) -> std::io::Result<PathBuf> {
 }
 #[cfg(test)]
 mod identity_tests {
+    #[test]
+    fn workbench_health_accepts_only_fixed_display_states() {
+        for state in ["ready", "loading", "error", "inactive"] {
+            let line = serde_json::json!({"launchDiagnostic": {"event": "workbench-health", "health": state}}).to_string();
+            assert_eq!(super::workbench_health(&line), Some(state));
+        }
+        assert_eq!(
+            super::workbench_health(r#"{"launchDiagnostic":{"event":"other","health":"ready"}}"#),
+            None
+        );
+        assert_eq!(
+            super::workbench_health(
+                r#"{"launchDiagnostic":{"event":"workbench-health","health":"private error"}}"#
+            ),
+            None
+        );
+        assert_eq!(super::workbench_health("private text"), None);
+    }
     use super::*;
+    #[test]
+    fn startup_refusals_write_only_fixed_metadata() {
+        let directory = std::env::temp_dir().join(format!("agent-desk-refusal-{}", Uuid::new_v4()));
+        fs::create_dir(&directory).unwrap();
+        append_launcher_start_refusal(&directory, "instance-already-running", None);
+        append_launcher_start_refusal(&directory, "codex-running", Some(42));
+        append_launcher_start_refusal(&directory, "private exception", None);
+        let text = fs::read_to_string(directory.join("agent-desk-startup.jsonl")).unwrap();
+        let records: Vec<serde_json::Value> = text
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(records.len(), 2);
+        assert_eq!(
+            records[0]["launchDiagnostic"]["reason"],
+            "instance-already-running"
+        );
+        assert_eq!(records[1]["launchDiagnostic"]["pid"], 42);
+        for record in records {
+            let diagnostic = &record["launchDiagnostic"];
+            assert_eq!(diagnostic["event"], "launcher-start-refused");
+            assert!(diagnostic.get("exitCode").is_none());
+            assert!(Uuid::parse_str(diagnostic["attemptId"].as_str().unwrap()).is_ok());
+            assert!(diagnostic.as_object().unwrap().len() <= 6);
+        }
+        fs::remove_file(directory.join("agent-desk-startup.jsonl")).unwrap();
+        fs::remove_dir(directory).unwrap();
+    }
     #[test]
     fn data_root_preserves_legacy_and_rejects_ambiguous_stores() {
         let base = Path::new("fixture");
@@ -1522,6 +1645,13 @@ fn main() {
             grant_windows_runtime_read_acl(&runtime_directory)?;
             let Some(instance_lock) = acquire_instance_lock(&data_directory.join("launcher.lock"))?
             else {
+                append_launcher_start_refusal(&log_directory, "instance-already-running", None);
+                app.dialog()
+                    .message("Agent Desk 已在运行。请使用系统托盘中的 Agent Desk 图标打开工作台；若刚退出，请等待数秒后再启动。")
+                    .title("Agent Desk")
+                    .kind(MessageDialogKind::Info)
+                    .buttons(MessageDialogButtons::Ok)
+                    .blocking_show();
                 app.handle().exit(0);
                 return Ok(());
             };

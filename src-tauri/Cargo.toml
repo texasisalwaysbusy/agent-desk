@@ -1,6 +1,6 @@
 [package]
 name = "agent-desk-launcher"
-version = "1.2.2"
+version = "1.2.3"
 description = "Agent Desk desktop launcher"
 edition = "2021"
 rust-version = "1.88"

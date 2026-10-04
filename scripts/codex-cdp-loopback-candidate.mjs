@@ -1,7 +1,7 @@
 // Shared registered activation for the launcher and opt-in source experiment.
 // CDP on loopback is not private:
 // another local process can discover and control the official Codex listener.
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -36,7 +36,7 @@ export async function reserveLoopbackPort() {
   return port;
 }
 
-export function activateRegisteredCodex({ port = 0, appPath, mode = "source-test" }) {
+export function activateRegisteredCodex({ port = 0, appPath, mode = "source-test" }, { run = execFileSync } = {}) {
   if (!["source-test", "launcher", "ordinary"].includes(mode)) throw new Error("Invalid activation mode");
   const launcherSelected = process.env.AGENT_DESK_WINDOWS_TRANSPORT === "registered-loopback";
   const sourceSelected = process.env.AGENT_DESK_LOOPBACK_CANDIDATE === "1";
@@ -47,11 +47,39 @@ export function activateRegisteredCodex({ port = 0, appPath, mode = "source-test
   if (!Number.isInteger(port) || (mode === "ordinary" ? port !== 0 : port < 1024 || port > 65535)) {
     throw new Error("Invalid candidate CDP port");
   }
-  const output = execFileSync("powershell.exe", [
-    "-NoProfile", "-NonInteractive", "-File",
-    activationScript, "-Port", String(port), "-ExpectedPath", appPath, "-Mode", mode,
-  ], { encoding: "utf8", windowsHide: true, timeout: 35_000,
-    stdio: ["ignore", "pipe", "pipe"] });
+  let output;
+  try {
+    output = run("powershell.exe", [
+      "-NoProfile", "-NonInteractive", "-File",
+      activationScript, "-Port", String(port), "-ExpectedPath", appPath, "-Mode", mode,
+    ], { encoding: "utf8", windowsHide: true, timeout: 35_000,
+      stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    // Only a fixed helper marker becomes diagnostic metadata. Never forward
+    // PowerShell output, executable paths or exception details to the log.
+    let marker;
+    const helperOutput = String(error.stdout ?? "").trim();
+    if (helperOutput.length <= 512) {
+      try { marker = JSON.parse(helperOutput); } catch {}
+    }
+    const activationReason = marker && !Array.isArray(marker)
+      && Object.keys(marker).every((key) => ["activationFailure", "activationStage"].includes(key))
+      && ["codex-running", "mode-not-selected", "invalid-port", "package-not-found", "manifest-missing",
+        "package-identity-mismatch", "signature-invalid", "port-taken", "process-not-visible",
+        "process-path-unavailable", "path-mismatch", "listener-misowned", "listener-timeout", "helper-error"]
+        .includes(marker.activationFailure) ? marker.activationFailure : undefined;
+    const activationStage = activationReason && ["selection", "package", "activation-preparation",
+      "activation-call", "process-validation", "listener-validation"].includes(marker.activationStage)
+      ? marker.activationStage : undefined;
+    const refused = activationReason === "codex-running";
+    const failure = new Error(refused
+      ? "Codex 进程仍在运行。请正常退出 Codex；若刚退出，请等待数秒后从托盘重试。"
+      : "Codex 注册激活失败。请查看启动诊断记录；自动重试已停止。");
+    failure.diagnosticReason = refused ? "codex-running" : "activation-failed";
+    if (activationReason) failure.activationReason = activationReason;
+    if (activationStage) failure.activationStage = activationStage;
+    throw failure;
+  }
   const result = JSON.parse(output.trim());
   if (!Number.isInteger(result.pid) || result.pid <= 0
     || (mode !== "ordinary" && result.listenerOwned !== true) || result.identityVerified !== true
@@ -61,17 +89,27 @@ export function activateRegisteredCodex({ port = 0, appPath, mode = "source-test
   return result;
 }
 
-export function inspectLoopbackProcess(port, pid) {
+export async function inspectLoopbackProcess(port, pid, { run = execFile } = {}) {
   if (!Number.isInteger(port) || port < 1024 || port > 65535 || !Number.isInteger(pid) || pid <= 0) {
     throw new Error("Invalid registered process identity");
   }
   const script = `$ErrorActionPreference='Stop'; $process=Get-Process -Id ${pid} -ErrorAction SilentlyContinue; $listeners=@(Get-NetTCPConnection -State Listen -LocalPort ${port} -ErrorAction SilentlyContinue); [pscustomobject]@{processAlive=($null -ne $process);listenerOwned=($listeners.Count -eq 1 -and $listeners[0].LocalAddress -ceq '127.0.0.1' -and $listeners[0].OwningProcess -eq ${pid})} | ConvertTo-Json -Compress`;
-  const output = execFileSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", script], {
-    encoding: "utf8", windowsHide: true, timeout: 5_000,
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
-  const result = JSON.parse(output);
-  if (typeof result.processAlive !== "boolean" || typeof result.listenerOwned !== "boolean") {
+  // Listener observation must not block the independent host heartbeat pump.
+  const output = await new Promise((resolve, reject) => run("powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-Command", script], {
+      encoding: "utf8", windowsHide: true, timeout: 5_000, maxBuffer: 4096,
+    }, (error, stdout) => {
+      if (error) {
+        // Never forward PowerShell's raw output, paths or command to diagnostics.
+        reject(Object.assign(new Error("Registered process observation failed"), {
+          code: error.killed || error.code === "ETIMEDOUT" ? "ETIMEDOUT" : "OBSERVATION_FAILED",
+        }));
+      } else resolve(stdout.trim());
+    }));
+  let result;
+  try { result = JSON.parse(output); }
+  catch { throw new Error("Invalid registered process observation"); }
+  if (!result || typeof result.processAlive !== "boolean" || typeof result.listenerOwned !== "boolean") {
     throw new Error("Invalid registered process observation");
   }
   return result;
@@ -238,15 +276,51 @@ export function createLoopbackCandidateRuntime(port, pid, {
   onDiscovery = () => {}, inspect = inspectLoopbackProcess, fetchTargets = fetch,
   connectSocket = (url) => new CdpLoopbackConnection(url),
   processObserver = null,
+  onObservation = () => {},
 } = {}) {
   let healthy = true;
+  let closed = false;
+  let unknownCount = 0;
+  let observation = "verified";
+  let terminalError = null;
   let processExited = false;
   let previousDiscovery = null;
   const connections = new Set();
+  const observe = async () => {
+    if (closed) throw new Error("Codex runtime closed");
+    if (terminalError) throw terminalError;
+    if (processObserver && (!processObserver.isHealthy() || Number.isInteger(processObserver.exitCode()))) {
+      healthy = false;
+      throw new Error("Registered process observer stopped");
+    }
+    let state;
+    try { state = await inspect(port, pid); }
+    catch (error) {
+      if (!closed && error.code === "ETIMEDOUT" && ++unknownCount < 3) {
+        if (observation !== "timeout") onObservation({ observation: "timeout", observationFailures: unknownCount });
+        observation = "timeout";
+        throw Object.assign(new Error("Registered process observation timed out; discovery deferred"), { observationPending: true });
+      }
+      healthy = false;
+      onObservation({ observation: "failed", observationFailures: Math.min(unknownCount, 3) });
+      terminalError = new Error("Registered process observation unavailable");
+      throw terminalError;
+    }
+    if (closed) throw new Error("Codex runtime closed");
+    if (!state || typeof state.processAlive !== "boolean" || typeof state.listenerOwned !== "boolean") {
+      healthy = false; terminalError = new Error("Invalid registered process observation"); throw terminalError;
+    }
+    if (!state.processAlive) { processExited = true; healthy = false; terminalError = new Error("Registered Codex exited"); return state; }
+    if (!state.listenerOwned) { healthy = false; terminalError = new Error("Codex CDP listener ownership changed"); throw terminalError; }
+    if (observation === "timeout") onObservation({ observation: "recovered", observationFailures: unknownCount });
+    observation = "verified";
+    unknownCount = 0;
+    return state;
+  };
   return {
     async targets() {
       try {
-        const state = inspect(port, pid);
+        const state = await observe();
         if (!state.processAlive) { processExited = true; healthy = false; return []; }
         if (!state.listenerOwned) throw new Error("Codex CDP listener ownership changed");
         const response = await fetchTargets(`http://127.0.0.1:${port}/json/list`, {
@@ -273,10 +347,13 @@ export function createLoopbackCandidateRuntime(port, pid, {
           previousDiscovery = fingerprint;
         }
         return eligible.map((target) => ({ ...target, targetId: target.id }));
-      } catch (error) { healthy = false; throw error; }
+      } catch (error) {
+        if (!error.observationPending) { healthy = false; terminalError ??= error; }
+        throw error;
+      }
     },
     async connect(target) {
-      const state = inspect(port, pid);
+      const state = await observe();
       if (!state.processAlive) { processExited = true; healthy = false; throw new Error("Registered Codex exited"); }
       if (!state.listenerOwned) { healthy = false; throw new Error("Codex CDP listener ownership changed"); }
       const connection = connectSocket(validateLoopbackTarget(target, port));
@@ -290,15 +367,11 @@ export function createLoopbackCandidateRuntime(port, pid, {
       && processObserver?.exitCode() == null,
     exitCode: () => processObserver?.exitCode() ?? null,
     processExited() {
-      // A normal exit may close the listener just before the process disappears.
-      // Reobserve only after transport loss; a still-running process is a failure.
-      if (!healthy && !processExited) {
-        try { processExited = inspect(port, pid).processAlive === false; } catch {}
-      }
-      return processExited;
+      return processExited || Number.isInteger(processObserver?.exitCode());
     },
     close() {
       healthy = false;
+      closed = true;
       processObserver?.close();
       for (const connection of connections) connection.close();
       connections.clear();
