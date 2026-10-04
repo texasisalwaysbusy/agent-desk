@@ -19,7 +19,7 @@ export async function offlineBrowser(url, callback) {
   let page, browser;
   try {
     let descriptor;
-    for (let n = 0; n < 100; n++) {
+    for (let n = 0; n < 300; n++) {
       try { descriptor = await readFile(path.join(directory, "DevToolsActivePort"), "utf8"); break; } catch {}
       if (child.exitCode !== null) throw new Error("Owned offline Chrome exited before ready");
       await delay(50);

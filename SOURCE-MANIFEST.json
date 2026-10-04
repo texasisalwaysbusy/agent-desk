@@ -1,7 +1,7 @@
 [
   {
     "path": ".github/workflows/check.yml",
-    "sha256": "49df75dd5bdfd745a4b63474d38283f5d995eb66507912ac2bfe02d1f4326215"
+    "sha256": "835943b2a9b5b57534005afdbc627415b6905d75a217ef2b9953cb6a8fd73476"
   },
   {
     "path": ".gitignore",
@@ -533,7 +533,7 @@
   },
   {
     "path": "test/helpers/offline-browser.mjs",
-    "sha256": "7312d300b735454a563dc9106b623f1fe52a487be28c6df90fce3dad49796db3"
+    "sha256": "da86e40b3d23d86c6940488a35efb0262ccb7527dc77b10c048d87a179925244"
   },
   {
     "path": "test/helpers/registered-activation-fixture.ps1",
@@ -645,7 +645,7 @@
   },
   {
     "path": "test/registered-activation-composite.test.mjs",
-    "sha256": "16a05efd963eccd9ce04bf4d0a6b0b9e69bfc26cbf43eb10d51c1077518a3343"
+    "sha256": "2e7687e9a2e263aaa86ee8a913ed779df7aa414c9e90ea194c64d3cf8c00db17"
   },
   {
     "path": "test/renderer-compatibility.test.mjs",

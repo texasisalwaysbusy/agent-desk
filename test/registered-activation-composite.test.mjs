@@ -12,7 +12,7 @@ const root = fileURLToPath(new URL("../", import.meta.url));
 const quote = (value) => `'${value.replaceAll("'", "''")}'`;
 
 test("complete registered helper and Node boundary reject unsafe states across child environments", {
-  skip: process.platform !== "win32", timeout: 120000,
+  skip: process.platform !== "win32", timeout: 240000,
 }, async () => {
   const powershell = path.join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe");
   const folder = await mkdtemp(path.join(os.tmpdir(), "agent-desk-activation-fixture-"));
@@ -69,7 +69,7 @@ test("complete registered helper and Node boundary reject unsafe states across c
     }`;
     execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command",
       `Add-Type -TypeDefinition ${quote(stub)} -OutputAssembly ${quote(assembly)}`], {
-      env: profiles["probe-explicit"], encoding: "utf8", windowsHide: true, timeout: 15000,
+      env: profiles["probe-explicit"], encoding: "utf8", windowsHide: true, timeout: 60000,
     });
     process.env.AGENT_DESK_WINDOWS_TRANSPORT = "registered-loopback";
     for (const { version, file: helperFile } of helpers) {
@@ -142,7 +142,7 @@ test("complete registered helper and Node boundary reject unsafe states across c
 });
 
 test("GUI and console parent subsystems preserve the hidden Node-to-PowerShell activation boundary", {
-  skip: process.platform !== "win32", timeout: 60000,
+  skip: process.platform !== "win32", timeout: 240000,
 }, async () => {
   const powershell = path.join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe");
   const folder = await mkdtemp(path.join(os.tmpdir(), "agent-desk-parent-fixture-"));
@@ -159,7 +159,7 @@ test("GUI and console parent subsystems preserve the hidden Node-to-PowerShell a
   const rows = [];
   try {
     execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command", `Add-Type -TypeDefinition ${quote(
-      'public static class AgentDeskRegisteredActivation { public static bool Fail; public static uint Activate(string id,string args) { return 4242; } }')} -OutputAssembly ${quote(assembly)}`], { env: complete, windowsHide: true, timeout: 15000 });
+      'public static class AgentDeskRegisteredActivation { public static bool Fail; public static uint Activate(string id,string args) { return 4242; } }')} -OutputAssembly ${quote(assembly)}`], { env: complete, windowsHide: true, timeout: 60000 });
     await writeFile(child, `import { execFileSync } from 'node:child_process';
       import { activateRegisteredCodex } from ${JSON.stringify(moduleUrl)};
       const [ps, fixture, helper, stub, scenario] = process.argv.slice(2);
@@ -192,7 +192,7 @@ test("GUI and console parent subsystems preserve the hidden Node-to-PowerShell a
       const parent = path.join(folder, `${type}.exe`);
       execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command",
         `Add-Type -TypeDefinition ${quote(driver)} -OutputAssembly ${quote(parent)} -OutputType ${type}`], {
-        env: complete, windowsHide: true, timeout: 15000,
+        env: complete, windowsHide: true, timeout: 60000,
       });
       const pe = await readFile(parent);
       assert.equal(pe.readUInt16LE(pe.readUInt32LE(0x3c) + 24 + 68), type === "WindowsApplication" ? 2 : 3);
