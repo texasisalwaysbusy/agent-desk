@@ -43,8 +43,15 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
       - run: npm ci
-      - name: Run the Windows Node.js test suite
-        run: npm test
+      - name: Run the Windows test suite with bounded process load
+        shell: pwsh
+        run: |
+          $windowsTestFiles = @(Get-ChildItem -LiteralPath test -Recurse -File -Filter '*.test.mjs' | Sort-Object FullName | ForEach-Object { $_.FullName })
+          if ($windowsTestFiles.Count -eq 0) { throw 'No Node tests found.' }
+          node --test --test-concurrency=1 @windowsTestFiles
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run test:components
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build the unsigned current-user NSIS installer
         run: npm run app:build:windows
       - name: Verify installer payload and packaged CLI

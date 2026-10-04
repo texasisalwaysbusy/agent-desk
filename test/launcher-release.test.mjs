@@ -178,7 +178,7 @@ test("automatic updates are absent from the hardened launcher", () => {
 test("Windows CI runs the Node suite and builds an unsigned NSIS installer", () => {
   assert.match(
     checkWorkflow,
-    /windows-launcher:[\s\S]*?run: npm test[\s\S]*?run: npm run app:build:windows/,
+    /windows-launcher:[\s\S]*?Get-ChildItem -LiteralPath test -Recurse -File -Filter '\*\.test\.mjs'[\s\S]*?node --test --test-concurrency=1 @windowsTestFiles[\s\S]*?if \(\$LASTEXITCODE -ne 0\) \{ exit \$LASTEXITCODE \}[\s\S]*?npm run test:components[\s\S]*?if \(\$LASTEXITCODE -ne 0\) \{ exit \$LASTEXITCODE \}[\s\S]*?run: npm run app:build:windows/,
   );
   assert.match(
     checkWorkflow,

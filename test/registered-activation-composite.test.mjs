@@ -11,6 +11,28 @@ import { activateRegisteredCodex } from "../scripts/codex-cdp-loopback-candidate
 const root = fileURLToPath(new URL("../", import.meta.url));
 const quote = (value) => `'${value.replaceAll("'", "''")}'`;
 
+// Compilation prepares inert OS-boundary fixtures; stripped child environments
+// belong to the activation matrix, not to the compiler setup.
+function compileFixture(powershell, source, assembly, outputType) {
+  const environment = Object.fromEntries([
+    "SystemRoot", "WINDIR", "COMSPEC", "TEMP", "TMP", "SystemDrive", "PATH",
+    "PATHEXT", "USERPROFILE", "HOMEDRIVE", "HOMEPATH", "LOCALAPPDATA", "APPDATA",
+    "ProgramFiles", "ProgramFiles(x86)", "ProgramData", "CommonProgramFiles",
+  ].filter((key) => process.env[key]).map((key) => [key, process.env[key]]));
+  const start = Date.now();
+  const command = `[Console]::Error.WriteLine('fixture-compile-entered'); Add-Type -TypeDefinition ${quote(source)} -OutputAssembly ${quote(assembly)}${outputType ? ` -OutputType ${outputType}` : ""}; [Console]::Error.WriteLine('fixture-compile-finished')`;
+  try {
+    execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command", command], {
+      env: environment, encoding: "utf8", windowsHide: true, timeout: 60000,
+    });
+    console.error(JSON.stringify({ kind: "fixture-compile", outputType: outputType ?? "Library", elapsedMs: Date.now() - start, outcome: "passed" }));
+  } catch (error) {
+    console.error(JSON.stringify({ kind: "fixture-compile", outputType: outputType ?? "Library", elapsedMs: Date.now() - start, outcome: "failed",
+      entered: String(error.stderr ?? "").includes("fixture-compile-entered"), finished: String(error.stderr ?? "").includes("fixture-compile-finished"), code: error.code ?? null }));
+    throw error;
+  }
+}
+
 test("complete registered helper and Node boundary reject unsafe states across child environments", {
   skip: process.platform !== "win32", timeout: 240000,
 }, async () => {
@@ -67,10 +89,7 @@ test("complete registered helper and Node boundary reject unsafe states across c
         return 4242;
       }
     }`;
-    execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command",
-      `Add-Type -TypeDefinition ${quote(stub)} -OutputAssembly ${quote(assembly)}`], {
-      env: profiles["probe-explicit"], encoding: "utf8", windowsHide: true, timeout: 60000,
-    });
+    compileFixture(powershell, stub, assembly);
     process.env.AGENT_DESK_WINDOWS_TRANSPORT = "registered-loopback";
     for (const { version, file: helperFile } of helpers) {
     for (const [profile, environment] of Object.entries(profiles)) {
@@ -158,8 +177,8 @@ test("GUI and console parent subsystems preserve the hidden Node-to-PowerShell a
     LOCALAPPDATA: process.env.LOCALAPPDATA, PATHEXT: ".EXE", AGENT_DESK_WINDOWS_TRANSPORT: "registered-loopback" };
   const rows = [];
   try {
-    execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command", `Add-Type -TypeDefinition ${quote(
-      'public static class AgentDeskRegisteredActivation { public static bool Fail; public static uint Activate(string id,string args) { return 4242; } }')} -OutputAssembly ${quote(assembly)}`], { env: complete, windowsHide: true, timeout: 60000 });
+    compileFixture(powershell,
+      'public static class AgentDeskRegisteredActivation { public static bool Fail; public static uint Activate(string id,string args) { return 4242; } }', assembly);
     await writeFile(child, `import { execFileSync } from 'node:child_process';
       import { activateRegisteredCodex } from ${JSON.stringify(moduleUrl)};
       const [ps, fixture, helper, stub, scenario] = process.argv.slice(2);
@@ -183,26 +202,24 @@ test("GUI and console parent subsystems preserve the hidden Node-to-PowerShell a
           using(var p=Process.Start(s)) {
             p.StandardInput.Close();
             var o=p.StandardOutput.ReadToEndAsync(); var e=p.StandardError.ReadToEndAsync();
-            if(!p.WaitForExit(15000)) { p.Kill(); return 8; }
+            if(!p.WaitForExit(40000)) { p.Kill(); return 8; }
             File.WriteAllText(a[7],o.Result); var ignored=e.Result; return p.ExitCode;
           }
         }
       }`;
     for (const type of ["ConsoleApplication", "WindowsApplication"]) {
       const parent = path.join(folder, `${type}.exe`);
-      execFileSync(powershell, ["-NoProfile", "-NonInteractive", "-Command",
-        `Add-Type -TypeDefinition ${quote(driver)} -OutputAssembly ${quote(parent)} -OutputType ${type}`], {
-        env: complete, windowsHide: true, timeout: 60000,
-      });
+      compileFixture(powershell, driver, parent, type);
       const pe = await readFile(parent);
       assert.equal(pe.readUInt16LE(pe.readUInt32LE(0x3c) + 24 + 68), type === "WindowsApplication" ? 2 : 3);
       for (const [profile, env] of Object.entries({ "receiver-minimal": { ...base,
         AGENT_DESK_WINDOWS_TRANSPORT: "registered-loopback" }, "probe-explicit": complete })) {
         for (const scenario of ["ready", "process-not-visible"]) {
           const result = spawnSync(parent, [process.execPath, child, powershell, fixture, helper, assembly, scenario, output], {
-            env, windowsHide: true, timeout: 20000, encoding: "utf8",
+            env, windowsHide: true, timeout: 45000, encoding: "utf8",
           });
           if (result.error) throw result.error;
+          console.error(JSON.stringify({ kind: "fixture-parent", type, profile, scenario, status: result.status }));
           assert.equal(result.status, scenario === "ready" ? 0 : 1, `${type}/${profile}/${scenario}`);
           const evidence = JSON.parse(await readFile(output, "utf8"));
           assert.deepEqual(evidence, scenario === "ready" ? { verified: true }

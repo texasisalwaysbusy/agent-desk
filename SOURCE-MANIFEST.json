@@ -1,7 +1,7 @@
 [
   {
     "path": ".github/workflows/check.yml",
-    "sha256": "835943b2a9b5b57534005afdbc627415b6905d75a217ef2b9953cb6a8fd73476"
+    "sha256": "c68a4af1566d995758d123440dc00ca1d7222d90f213baf44c873ae244327153"
   },
   {
     "path": ".gitignore",
@@ -585,7 +585,7 @@
   },
   {
     "path": "test/launcher-release.test.mjs",
-    "sha256": "74f0449f48ce64d123938661ef9220aef96c8034e90f77e5c1839b33da9d41e3"
+    "sha256": "5d0bebb58b4252621322656ee1647094d63dfcaad1717eb01e0bd27ca73f371c"
   },
   {
     "path": "test/manage-taskboard-skill.test.mjs",
@@ -645,7 +645,7 @@
   },
   {
     "path": "test/registered-activation-composite.test.mjs",
-    "sha256": "2e7687e9a2e263aaa86ee8a913ed779df7aa414c9e90ea194c64d3cf8c00db17"
+    "sha256": "200698dfd3058ce83d5825171591e9c690c075686c0d4decaac8c9a59ea9d29c"
   },
   {
     "path": "test/renderer-compatibility.test.mjs",
