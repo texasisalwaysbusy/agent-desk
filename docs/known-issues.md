@@ -1,8 +1,8 @@
 # Known issues and release status / 已知问题与版本状态
 
-Reviewed 2026-10-03. Stable release: **v1.2.3**. No remaining user-visible regression was confirmed in the accepted field matrix. This is not a guarantee that no bugs exist.
+Reviewed 2026-10-03. Stable release: **v1.2.2**. Version **1.2.3** is undergoing CI verification and has not been published. No remaining user-visible regression was confirmed in the accepted field matrix. This is not a guarantee that no bugs exist.
 
-核对日期2026-10-03，正式版 **v1.2.3**。已验收矩阵中没有确认仍存在的用户可见回归，不等于保证不存在任何bug。
+核对日期2026-10-03，正式版 **v1.2.2**；**1.2.3** 正在进行 CI 验证，尚未发布。已验收矩阵中没有确认仍存在的用户可见回归，不等于保证不存在任何bug。
 
 ## Observed scope / 已验收范围
 

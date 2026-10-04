@@ -1,13 +1,12 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { createHmac } from "node:crypto";
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import http from "node:http";
-import os from "node:os";
-import path from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { chrome, offlineBrowser, delay } from "./helpers/offline-browser.mjs";
 
 const execFileAsync = promisify(execFile);
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -27,24 +26,6 @@ const embeddedHostSource = await readFile(
 );
 const embeddedHostClassicSource = embeddedHostSource.replaceAll("export ", "");
 
-async function chromeExecutable() {
-  const candidates = [
-    process.env.CHROME_PATH,
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-    "/Applications/Chromium.app/Contents/MacOS/Chromium",
-    "/usr/bin/google-chrome",
-    "/usr/bin/google-chrome-stable",
-    "/usr/bin/chromium",
-    "/usr/bin/chromium-browser",
-  ].filter(Boolean);
-  for (const candidate of candidates) {
-    try {
-      await access(candidate);
-      return candidate;
-    } catch (_) {}
-  }
-  return null;
-}
 
 function fixtureHtml(origin) {
   const encodedSource = Buffer.from(source).toString("base64");
@@ -226,7 +207,6 @@ function fixtureHtml(origin) {
 }
 
 test("Taskboard fills the workspace, opens HTTPS links and revokes hostile iframe navigation", async (t) => {
-  const chrome = await chromeExecutable();
   if (!chrome) {
     t.skip("Chrome or Chromium is not installed");
     return;
@@ -268,33 +248,19 @@ test("Taskboard fills the workspace, opens HTTPS links and revokes hostile ifram
     server.closeAllConnections();
   }));
 
-  const profile = await mkdtemp(path.join(os.tmpdir(), "taskboard-fullheight-chrome-"));
-  t.after(() => rm(profile, { recursive: true, force: true }));
   const url = `http://127.0.0.1:${server.address().port}/fixture`;
-  let stdout;
-  try {
-    ({ stdout } = await execFileAsync(chrome, [
-      "--headless=new",
-      "--disable-gpu",
-      "--no-sandbox",
-      `--user-data-dir=${profile}`,
-      "--virtual-time-budget=12000",
-      "--dump-dom",
-      url,
-    ], { maxBuffer: 5 * 1024 * 1024, timeout: 20_000 }));
-  } catch (error) {
-    if (!String(error?.stdout ?? "").trim()) {
-      t.skip("Chrome or Chromium cannot run headless dump-dom in this environment");
-      return;
+  // Network/frame handshakes finish in real time; virtual-time dump-dom can
+  // return before an asynchronous result on a busy CI worker.
+  const encodedResult = await offlineBrowser(url, async (page) => {
+    for (let attempt = 0; attempt < 300; attempt++) {
+      const response = await page.send("Runtime.evaluate", {
+        expression: "document.getElementById('result')?.textContent ?? ''", returnByValue: true,
+      });
+      if (response.result.value) return response.result.value;
+      await delay(50);
     }
-    throw error;
-  }
-  if (!stdout.trim()) {
-    t.skip("Chrome or Chromium cannot run headless dump-dom in this environment");
-    return;
-  }
-
-  const encodedResult = stdout.match(/<output id="result">([^<]+)<\/output>/)?.[1];
+    return null;
+  });
   assert.ok(encodedResult, "fixture did not report an injection result");
   const result = JSON.parse(Buffer.from(encodedResult, "base64").toString("utf8"));
   assert.deepEqual(result, {

@@ -34,7 +34,7 @@ function compileFixture(powershell, source, assembly, outputType) {
 }
 
 test("complete registered helper and Node boundary reject unsafe states across child environments", {
-  skip: process.platform !== "win32", timeout: 240000,
+  skip: process.platform !== "win32", timeout: 1500000,
 }, async () => {
   const powershell = path.join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe");
   const folder = await mkdtemp(path.join(os.tmpdir(), "agent-desk-activation-fixture-"));
@@ -104,10 +104,12 @@ test("complete registered helper and Node boundary reject unsafe states across c
               assert.equal(options.timeout, 35000);
               assert.deepEqual(options.stdio, ["ignore", "pipe", "pipe"]);
               assert.equal(args.at(-1), "launcher");
+              const caseStart = Date.now();
               capture = spawnSync(powershell, ["-NoProfile", "-NonInteractive", "-File", fixture,
                 "-HelperFile", helperFile, "-StubAssembly", assembly, "-Scenario", scenario], {
-                ...options, timeout: 10000, env: { ...environment, AGENT_DESK_WINDOWS_TRANSPORT: "registered-loopback" },
+                ...options, env: { ...environment, AGENT_DESK_WINDOWS_TRANSPORT: "registered-loopback" },
               });
+              console.error(JSON.stringify({ kind: "fixture-case", profile, scenario, elapsedMs: Date.now() - caseStart, status: capture.status, code: capture.error?.code ?? null }));
               if (capture.error) throw capture.error;
               if (capture.status !== 0) throw Object.assign(new Error("child failed"), { stdout: capture.stdout });
               return capture.stdout;

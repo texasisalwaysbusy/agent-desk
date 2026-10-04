@@ -4,7 +4,7 @@
 
 **把分散的智能体对话，组织成可追踪、可审阅、可完成的项目。**
 
-[Download for Windows](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.3) · [简体中文](README.zh-CN.md) · [Screenshots](docs/showcase.md) · [Changelog](CHANGELOG.md)
+[Download for Windows](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.2) · [简体中文](README.zh-CN.md) · [Screenshots](docs/showcase.md) · [Changelog](CHANGELOG.md)
 
 Agent Desk is a local project workspace inside the official Codex desktop app on Windows. Keep tasks, deadlines, agent assignments and human review in one place: see what needs attention, return to the conversation behind a task, and decide what is ready to move forward.
 
@@ -53,13 +53,13 @@ Project automation prepares requests for Codex's native Scheduled tasks. Agent D
 
 ## Download and compatibility
 
-**[Agent Desk 1.2.3 · Windows x64 installer](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.3/Agent-Desk-1.2.3-Windows-x64-setup.exe)**
+**[Agent Desk 1.2.2 · Windows x64 installer](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.2/Agent-Desk-1.2.2-Windows-x64-setup.exe)**
 
-[Release notes and SHA-256](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.3) · [Known issues and candidate status](docs/known-issues.md)
+[Release notes and SHA-256](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.2) · [Known issues and candidate status](docs/known-issues.md)
 
-The current public stable release is v1.2.3, built with the Release profile. Its installer is unsigned and installs for the current user. Automatic updates are disabled; login autostart is optional. Only Windows x64 is supported.
+The current public stable release is v1.2.2. Version 1.2.3 is undergoing CI verification and is not yet published. Its installer is unsigned and installs for the current user. Automatic updates are disabled; login autostart is optional. Only Windows x64 is supported.
 
-The 1.2.3 runtime was accepted in two field sessions on Codex 26.930.3930.0, including direct entry from existing conversations, Scheduled/Settings return, sidebar layouts, quota recovery and normal exits. Approximately 20 minutes of idle use remained stable; the user accepted that observation. This release includes the maintenance fixes and the selected glass quota style. See the [release notes](docs/release-1.2.3.md) for the observed scope.
+The 1.2.3 runtime was accepted in two field sessions on Codex 26.930.3930.0, including direct entry from existing conversations, Scheduled/Settings return, sidebar layouts, quota recovery and normal exits. Approximately 20 minutes of idle use remained stable; the user accepted that observation. The prepared 1.2.3 update includes the maintenance fixes and the selected glass quota style. See the [release notes](docs/release-1.2.3.md) for the observed scope.
 
 Exit Codex and the old tray normally before installing or starting through Agent Desk. Preserve the old installation and data for rollback; do not run two launchers at once. Renderer compatibility is checked structurally on each new document; future Codex versions are not guaranteed compatible. Live approval execution has separate setup and acceptance requirements.
 

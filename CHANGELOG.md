@@ -1,6 +1,6 @@
 # Changelog / 更新日志
 
-## [1.2.3](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.3) · 2026-10-03
+## 1.2.3 · Pending publication / 待发布
 
 - Recover the workbench and quota after Scheduled/Settings navigation. Park on unsupported routes and restore the native page before an explicit reopen.
 - Open directly from existing conversations; keep the entry in its own aligned native sidebar row with matching type and a discreet arrow.

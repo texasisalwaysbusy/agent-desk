@@ -13,7 +13,7 @@
   },
   {
     "path": "CHANGELOG.md",
-    "sha256": "2f8f9e17f9cb985d9482468c12e316dde081cc6bc23975350cf133696ff21311"
+    "sha256": "b50cafe4d5bbb7a882ed37874bda412a5ee39965846e89815e182cf2e44f85a3"
   },
   {
     "path": "LICENSE",
@@ -29,11 +29,11 @@
   },
   {
     "path": "README.md",
-    "sha256": "c1d3852e8bf2ceb839ec408decae4a0ce2f9b6eaf5c8edd91de40e145f23d5ef"
+    "sha256": "72885b55343a835fb9694cb86e462dc915de44c66787ad24626b8fb7ccd59aaf"
   },
   {
     "path": "README.zh-CN.md",
-    "sha256": "657599883439d55ea8d8c28fd861940e384b60f75ade0c59dfd2e4886b15578d"
+    "sha256": "87b504e19cee4116a4bbab6b8dccaf7e04292e6747e1bf9eb30659ca88545787"
   },
   {
     "path": "cli/agentdesk.mjs",
@@ -69,7 +69,7 @@
   },
   {
     "path": "docs/known-issues.md",
-    "sha256": "89cb465fa3ef24d5cd3801f52822fdace6e6f369d2468968f0429e39893a8351"
+    "sha256": "dd2f259f595373a7406d498071a9f43e82776489e2ab4b7bc8c07d62e807da5c"
   },
   {
     "path": "docs/licensing.md",
@@ -533,7 +533,7 @@
   },
   {
     "path": "test/helpers/offline-browser.mjs",
-    "sha256": "da86e40b3d23d86c6940488a35efb0262ccb7527dc77b10c048d87a179925244"
+    "sha256": "402bbca68533eff8f49933bd3fe6be9810a4fb1cb1e6a26392d3667ff5a55dfe"
   },
   {
     "path": "test/helpers/registered-activation-fixture.ps1",
@@ -541,7 +541,7 @@
   },
   {
     "path": "test/inject-fullheight-regression.test.mjs",
-    "sha256": "1706e224d38864ffeaae05a830853b3c889a09221f1a04496ff5ad8a5a27c384"
+    "sha256": "38133df2431e628f831569b1e1f423026b0af2dc77654777c2e56e446d1202bc"
   },
   {
     "path": "test/inject.test.mjs",
@@ -645,7 +645,7 @@
   },
   {
     "path": "test/registered-activation-composite.test.mjs",
-    "sha256": "200698dfd3058ce83d5825171591e9c690c075686c0d4decaac8c9a59ea9d29c"
+    "sha256": "55b5840bdfea9a12e51b872089c702a1fdc6094807ef85c8a57ff43e93e08a09"
   },
   {
     "path": "test/renderer-compatibility.test.mjs",

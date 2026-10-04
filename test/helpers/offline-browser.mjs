@@ -6,7 +6,10 @@ import os from "node:os";
 import path from "node:path";
 import { CdpLoopbackConnection } from "../../scripts/codex-cdp-loopback-candidate.mjs";
 
-export const chrome = [process.env.CHROME_BIN, "C:/Program Files/Google/Chrome/Application/chrome.exe", "/usr/bin/chromium"]
+export const chrome = [process.env.CHROME_BIN, process.env.CHROME_PATH,
+  "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  "/usr/bin/google-chrome", "/usr/bin/google-chrome-stable", "/usr/bin/chromium", "/usr/bin/chromium-browser"]
   .find(p => p && existsSync(p));
 export const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 // Only our freshly spawned headless Chrome and disposable synthetic profile.
