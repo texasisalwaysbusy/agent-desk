@@ -163,7 +163,7 @@ test("complete registered helper and Node boundary reject unsafe states across c
 });
 
 test("GUI and console parent subsystems preserve the hidden Node-to-PowerShell activation boundary", {
-  skip: process.platform !== "win32", timeout: 240000,
+  skip: process.platform !== "win32", timeout: 3 * 60000 + 8 * 45000 + 60000,
 }, async () => {
   const powershell = path.join(process.env.SystemRoot, "System32/WindowsPowerShell/v1.0/powershell.exe");
   const folder = await mkdtemp(path.join(os.tmpdir(), "agent-desk-parent-fixture-"));

@@ -1,7 +1,7 @@
 [
   {
     "path": ".github/workflows/check.yml",
-    "sha256": "c68a4af1566d995758d123440dc00ca1d7222d90f213baf44c873ae244327153"
+    "sha256": "7c00340168094f4a7cd3e3a19609c8925cbbb3839b873ff2f6504accb9cfc115"
   },
   {
     "path": ".gitignore",
@@ -645,7 +645,7 @@
   },
   {
     "path": "test/registered-activation-composite.test.mjs",
-    "sha256": "55b5840bdfea9a12e51b872089c702a1fdc6094807ef85c8a57ff43e93e08a09"
+    "sha256": "6b79f1e5bb2dfca37761763b31c9dae575db66ba24aadcce08f84ca5d2345052"
   },
   {
     "path": "test/renderer-compatibility.test.mjs",
