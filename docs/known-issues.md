@@ -1,8 +1,8 @@
 # Known issues and release status / 已知问题与版本状态
 
-Reviewed 2026-10-05. Public stable release: **v1.2.2**. Accepted **1.2.4** is being packaged for publication; the earlier unpublished v1.2.3 tag is preserved. No remaining user-visible failure was confirmed in the accepted observations.
+Reviewed 2026-10-06. Public stable release: **v1.2.4**; the earlier unpublished v1.2.3 tag is preserved. No remaining user-visible failure was confirmed in the accepted observations.
 
-核对日期 2026-10-05。公开正式版 **v1.2.2**；已接受的 **1.2.4** 正在准备发行，保留未发行的 v1.2.3 标签。已接受观察中未确认遗留的用户可见故障。
+核对日期 2026-10-06。公开正式版 **v1.2.4**，保留未发行的 v1.2.3 标签。已接受观察中未确认遗留的用户可见故障。
 
 ## Observed scope / 已接受范围
 

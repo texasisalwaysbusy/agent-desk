@@ -110,29 +110,3 @@ jobs:
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*-setup.exe
             dist/ci-release-verification/PACKAGE-VERIFICATION.json
           if-no-files-found: error
-
-  publish-1-2-4:
-    name: Publish approved 1.2.4 only
-    if: github.event_name == 'push' && github.ref == 'refs/tags/v1.2.4' && github.repository == 'texasisalwaysbusy/agent-desk'
-    needs: [check, windows-launcher]
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: write
-      actions: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Publish the verified installer and checksums
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: texasisalwaysbusy/agent-desk
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REF_NAME" = 'v1.2.4'
-          test "$(node -p 'require("./package.json").version')" = '1.2.4'
-          gh run download "$GITHUB_RUN_ID" --name "windows-x64-nsis-$GITHUB_SHA" --dir release-assets
-          node -e 'const fs=require("fs"),p=require("path"),c=require("crypto");function walk(d){return fs.readdirSync(d,{withFileTypes:true}).flatMap(e=>e.isDirectory()?walk(p.join(d,e.name)):[p.join(d,e.name)])}const files=walk("release-assets"),exe=files.find(f=>p.basename(f)==="Agent Desk_1.2.4_x64-setup.exe"),meta=files.find(f=>p.basename(f)==="PACKAGE-VERIFICATION.json");if(!exe||!meta)throw Error("Missing assets");const v=JSON.parse(fs.readFileSync(meta));if(v.version!=="1.2.4"||v.profile!=="Release"||v.signature!=="NotSigned"||v.packagedCLI!=="passed"||v.resourceFilesMatched!==201||v.launcherSubsystem!==2)throw Error("Verification failed");const hash=c.createHash("sha256").update(fs.readFileSync(exe)).digest("hex");if(hash!==v.installerSHA256)throw Error("Artifact hash mismatch");const name="Agent-Desk-1.2.4-Windows-x64-setup.exe";fs.copyFileSync(exe,name);fs.writeFileSync("SHA256SUMS.txt",hash+"  "+name+"\n")'
-          sha256sum --check SHA256SUMS.txt
-          gh release create v1.2.4 Agent-Desk-1.2.4-Windows-x64-setup.exe SHA256SUMS.txt --verify-tag --title 'Agent Desk 1.2.4' --notes-file docs/release-1.2.4.md --latest

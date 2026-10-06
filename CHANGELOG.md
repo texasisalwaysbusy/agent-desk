@@ -1,6 +1,6 @@
 # Changelog / 更新日志
 
-## 1.2.4 · Pending publication / 待发布
+## [1.2.4](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.4) · 2026-10-06
 
 - Restore injection on updated Codex / Pro sidebars with additional native header rows, including Your dot.
 - Add bounded target-discovery recovery for transient HTTP failures without weakening identity checks or changing transports.

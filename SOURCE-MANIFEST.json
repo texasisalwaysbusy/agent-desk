@@ -1,7 +1,7 @@
 [
   {
     "path": ".github/workflows/check.yml",
-    "sha256": "1782f9c37d78484150268b5428863ce813b9ee9375656868d12e5cf3c2fe67d6"
+    "sha256": "f2c4e46675ec052fe97c6b8684e2998dd38a4f5a4606765b16c62969365277d4"
   },
   {
     "path": ".gitignore",
@@ -13,7 +13,7 @@
   },
   {
     "path": "CHANGELOG.md",
-    "sha256": "a856bdf91e825cf7152c6d4c4a6aa7e94cbf49a78c8ee34d5477c4dee4bf3a31"
+    "sha256": "fb8d09a6c9602460a1210a5debf8340e5dc76e1d3b6f0789de6753df0ec18230"
   },
   {
     "path": "LICENSE",
@@ -29,11 +29,11 @@
   },
   {
     "path": "README.md",
-    "sha256": "a1d035bb85fb8b63fce445b006898a2821c8e7b97cffd4ddd8b1c715c642e25d"
+    "sha256": "15cdc0c7ace2d029279897fc1065939c31da70d4be1435df04dd0a7ffb539997"
   },
   {
     "path": "README.zh-CN.md",
-    "sha256": "a28181be824a50af07408aef8d60e5851b2a1ebc8fbd54cbd9e228387ef2d7bc"
+    "sha256": "4772a68796dfa1b49e56a995c40ed502e6cc4ffb0b8b1f5e20364b93d8304162"
   },
   {
     "path": "cli/agentdesk.mjs",
@@ -69,7 +69,7 @@
   },
   {
     "path": "docs/known-issues.md",
-    "sha256": "e24c6fce3f31a63b7fb626ed2c55f6ea90d79ba707a5c4fc12e31a5a495ddc84"
+    "sha256": "1ed975ebe9db8f85b96d226cc4d9d545d631fd426070ffe577f80a09e066dc3d"
   },
   {
     "path": "docs/licensing.md",

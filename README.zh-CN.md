@@ -2,7 +2,7 @@
 
 **把分散的智能体对话，组织成可追踪、可审阅、可完成的项目。**
 
-[下载 Windows 版](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.2) · [English](README.md) · [功能例图](docs/showcase.md) · [更新日志](CHANGELOG.md)
+[下载 Windows 版](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.4) · [English](README.md) · [功能例图](docs/showcase.md) · [更新日志](CHANGELOG.md)
 
 Agent Desk 是嵌入 Windows 官方 Codex 桌面应用的本地项目工作台。任务、截止日期、智能体分工和人工审阅集中在同一个地方：知道下一步该处理什么，找到任务背后的对话，再判断结果是否可以继续推进。
 
@@ -51,13 +51,13 @@ Agent Desk 是嵌入 Windows 官方 Codex 桌面应用的本地项目工作台�
 
 ## 下载、版本与兼容
 
-**[下载 Agent Desk 1.2.2 · Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.2/Agent-Desk-1.2.2-Windows-x64-setup.exe)**
+**[下载 Agent Desk 1.2.4 · Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.4/Agent-Desk-1.2.4-Windows-x64-setup.exe)**
 
-[发行说明与 SHA-256 校验文件](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.2) · [已知问题与候选状态](docs/known-issues.md)
+[发行说明与 SHA-256 校验文件](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.4) · [已知问题与候选状态](docs/known-issues.md)
 
-目前公开稳定版是 v1.2.2；1.2.4 正在准备发行，尚未发布。按当前用户安装，安装包未签名。支持 Windows x64，不提供自动更新；登录自启动由你选择启用。
+目前公开稳定版是 v1.2.4，保留较早未发行的 v1.2.3 标签。按当前用户安装，安装包未签名。支持 Windows x64，不提供自动更新；登录自启动由你选择启用。
 
-1.2.4 候选兼容新版 Codex / Pro 侧栏，支持短暂目标发现错误的有界恢复，并汇入工作台、审批和选定的玻璃额度修复。六段外部监督完成约 5.5 小时，无功能失败记录；用户确认关机前工作台可打开、额度正常，并接受该范围。[发行说明](docs/release-1.2.4.md)保留诊断部分覆盖、收尾与正常退出未执行等观察边界。
+1.2.4 正式版兼容新版 Codex / Pro 侧栏，支持短暂目标发现错误的有界恢复，并汇入工作台、审批和选定的玻璃额度修复。六段外部监督完成约 5.5 小时，无功能失败记录；用户确认关机前工作台可打开、额度正常，并接受该范围。[发行说明](docs/release-1.2.4.md)保留诊断部分覆盖、收尾与正常退出未执行等观察边界。
 
 安装或启动前正常退出 Codex 和旧托盘，保留旧版安装及数据作为回退点，不同时运行两套启动器。每个新文档都要通过结构兼容检查，不能保证所有未来 Codex 版本都兼容。人工审批执行需要另行配置集成并验收。
 

@@ -4,7 +4,7 @@
 
 **把分散的智能体对话，组织成可追踪、可审阅、可完成的项目。**
 
-[Download for Windows](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.2) · [简体中文](README.zh-CN.md) · [Screenshots](docs/showcase.md) · [Changelog](CHANGELOG.md)
+[Download for Windows](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.4) · [简体中文](README.zh-CN.md) · [Screenshots](docs/showcase.md) · [Changelog](CHANGELOG.md)
 
 Agent Desk is a local project workspace inside the official Codex desktop app on Windows. Keep tasks, deadlines, agent assignments and human review in one place: see what needs attention, return to the conversation behind a task, and decide what is ready to move forward.
 
@@ -53,13 +53,13 @@ Project automation prepares requests for Codex's native Scheduled tasks. Agent D
 
 ## Download and compatibility
 
-**[Agent Desk 1.2.2 · Windows x64 installer](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.2/Agent-Desk-1.2.2-Windows-x64-setup.exe)**
+**[Agent Desk 1.2.4 · Windows x64 installer](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.4/Agent-Desk-1.2.4-Windows-x64-setup.exe)**
 
-[Release notes and SHA-256](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.2) · [Known issues and candidate status](docs/known-issues.md)
+[Release notes and SHA-256](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.4) · [Known issues and candidate status](docs/known-issues.md)
 
-The current public stable release is v1.2.2. Accepted version 1.2.4 is being packaged for publication; the earlier unpublished v1.2.3 tag is retained. The current-user installer is unsigned. Automatic updates are disabled; login autostart is optional. Only Windows x64 is supported.
+The current public stable release is v1.2.4; the earlier unpublished v1.2.3 tag is retained. The current-user installer is unsigned. Automatic updates are disabled; login autostart is optional. Only Windows x64 is supported.
 
-The 1.2.4 candidate restores injection on updated Codex / Pro sidebars, adds bounded discovery recovery and includes the workbench, approval and selected glass quota improvements. Six externally supervised phases completed approximately 5.5 hours without recorded functional failure; the user accepted the scope and confirmed workbench/quota before shutdown. See the [release notes](docs/release-1.2.4.md) for observation limits.
+The 1.2.4 release restores injection on updated Codex / Pro sidebars, adds bounded discovery recovery and includes the workbench, approval and selected glass quota improvements. Six externally supervised phases completed approximately 5.5 hours without recorded functional failure; the user accepted the scope and confirmed workbench/quota before shutdown. See the [release notes](docs/release-1.2.4.md) for observation limits.
 
 Exit Codex and the old tray normally before installing or starting through Agent Desk. Preserve the old installation and data for rollback; do not run two launchers at once. Renderer compatibility is checked structurally on each new document; future Codex versions are not guaranteed compatible. Live approval execution has separate setup and acceptance requirements.
 
