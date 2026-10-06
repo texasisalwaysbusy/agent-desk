@@ -12,7 +12,7 @@ const chrome = [process.env.CHROME_BIN, "C:/Program Files/Google/Chrome/Applicat
 const desk = await readFile(new URL("../inject/codex-taskboard.user.js", import.meta.url), "utf8");
 const quota = await readFile(new URL("../inject/codex-quota-display.user.js", import.meta.url), "utf8");
 const baselinePath = new URL("../dist/maintenance/20260930-quota-lifecycle-trace/extracted/app/inject/codex-taskboard.user.js", import.meta.url);
-function fixture(script, width, headerLayout, ordered, sizing = "fixed") {
+function fixture(script, width, headerLayout, ordered, sizing = "fixed", pro = false) {
   const sizeRule = sizing === "fixed" ? "height:40px" : sizing === "full" ? "height:100%;min-height:100%"
     : sizing === "inline" ? "height:40px" : "height:40px;min-height:40px";
   const inline = sizing === "inline" ? 'style="height:100%;min-height:100%;flex:1 1 100%;position:relative"' : "";
@@ -22,11 +22,13 @@ function fixture(script, width, headerLayout, ordered, sizing = "fixed") {
     nav{height:100%;display:flex;flex-direction:column}
     .native-header{display:${headerLayout};${headerLayout === "grid" ? "grid-template-columns:repeat(2,minmax(0,1fr));" : ""}padding:8px;flex:none;order:${ordered ? 1 : 0}}
     .sidebar-item{display:flex;align-items:center;flex:1;min-width:0;${sizeRule};padding:8px;white-space:nowrap;overflow:hidden}
+    .native-header > div > .sidebar-item{width:100%}
     ${sizing === "context" ? 'nav > .sidebar-item{height:100%;min-height:100%;flex:1 1 100%}' : ''}
     .overflow-y-auto{flex:1;min-height:0;overflow:auto;order:${ordered ? 2 : 0}}
     .rows{height:900px}.sidebar-item svg{width:20px;flex:none;margin-right:8px}
   </style><aside data-app-shell-left-panel-appearance="content-surface"><nav role="navigation" aria-label="Fixture">
-    <div class="native-header"><button class="sidebar-item" ${inline}><svg></svg><span class="text-fade-truncate">新聊天</span></button></div>
+    <div class="native-header">${pro ? '<div>' : ''}<button class="sidebar-item" ${inline}><svg></svg><span class="text-fade-truncate">新聊天</span></button>${pro ? '</div>' : ''}
+      ${pro ? '<div><button class="sidebar-item"><svg></svg><span class="text-fade-truncate">Your dot</span></button></div>' : ''}</div>
     <div class="overflow-y-auto" data-app-action-sidebar-scroll><section data-app-action-sidebar-section class="rows">
     <div role="button" data-app-action-sidebar-project-row>Fixture</div></section></div></nav></aside>
     <main><div><div data-app-shell-main-content-layout><div class="app-shell-main-content-frame"></div></div></div></main>
@@ -66,12 +68,12 @@ function fixture(script, width, headerLayout, ordered, sizing = "fixed") {
     document.getElementById('result').textContent=JSON.stringify({phases,parked,replacedSeparately,cleaned});
   </script></html>`;
 }
-async function run(script, width, layout, ordered, sizing) {
+async function run(script, width, layout, ordered, sizing, pro) {
   const folder = await mkdtemp(path.join(os.tmpdir(), "agent-desk-entry-row-"));
   assert.equal(path.dirname(path.resolve(folder)), path.resolve(os.tmpdir()));
   assert.ok(path.basename(folder).startsWith("agent-desk-entry-row-"));
   try {
-    const html = path.join(folder, "fixture.html"); await writeFile(html, fixture(script, width, layout, ordered, sizing));
+    const html = path.join(folder, "fixture.html"); await writeFile(html, fixture(script, width, layout, ordered, sizing, pro));
     const profile = await mkdtemp(path.join(folder, "chrome-"));
     const { stdout } = await promisify(execFile)(chrome, ["--headless=new", "--no-first-run", "--no-default-browser-check",
       "--disable-background-networking", "--disable-extensions", `--user-data-dir=${profile}`,
@@ -94,6 +96,19 @@ test("native horizontal/grid New Chat row versus independent workbench entry: ge
       assert.ok(Math.abs(phase.entryLabelLeft-phase.nativeLabelLeft)<1);assert.equal(phase.arrowWidth,12);
       assert.equal(phase.diagnostics.entryOversized, false); assert.equal(phase.diagnostics.listUsable, true);
       assert.equal(phase.diagnostics.entrySeparateRow, true); assert.equal(phase.diagnostics.entrySharesNativeRow, false);
+    }
+    assert.ok(result.parked.every(Boolean)); assert.equal(result.replacedSeparately, true); assert.equal(result.cleaned, true);
+  }
+});
+
+test("Pro multi-row header preserves native markup, separate entry, quota and route recovery", { skip: !chrome }, async () => {
+  for (const width of [200, 280, 400]) for (const ordered of [false, true]) {
+    const result = await run(desk, width, "block", ordered, "context", true);
+    for (const phase of result.phases) {
+      assert.equal(phase.nativeUnchanged, true); assert.equal(phase.separate, true);
+      assert.equal(phase.height, 40); assert.equal(phase.fits, true); assert.equal(phase.listBelow, true);
+      assert.ok(phase.listHeight >= 350); assert.equal(phase.quota, true); assert.equal(phase.quotaClipped, false);
+      assert.equal(phase.entryFont, phase.nativeFont); assert.equal(phase.arrowWidth, 12);
     }
     assert.ok(result.parked.every(Boolean)); assert.equal(result.replacedSeparately, true); assert.equal(result.cleaned, true);
   }

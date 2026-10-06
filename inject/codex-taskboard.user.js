@@ -1,7 +1,7 @@
 (() => {
   "use strict";
 
-  const VERSION = "0.6.21";
+  const VERSION = "0.6.22";
   const SOURCE_HASH = window.__CODEX_TASKBOARD_SOURCE_HASH__;
   const SENTINEL_KEY = "__codexTaskboardInjection__";
   const DEFAULT_TASKBOARD_URL = "http://127.0.0.1:47823/?host=codex";
@@ -328,6 +328,12 @@
       && candidate.getBoundingClientRect().width >= 100;
   }
 
+  function visibleNativeRow(candidate) {
+    return candidate && !candidate.closest('[hidden], [inert], [aria-hidden="true"]')
+      && getComputedStyle(candidate).display !== "none" && getComputedStyle(candidate).visibility !== "hidden"
+      && candidate.getBoundingClientRect().width > 0 && candidate.getBoundingClientRect().height > 0;
+  }
+
   function findReferenceButton() {
     const visibleSidebar = (candidate) => {
       if (!candidate || candidate.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
@@ -365,12 +371,16 @@
       ? nativeChildren[0] : null;
     const headerButtons = headerHost
       ? Array.from(headerHost.querySelectorAll("button.sidebar-item"))
-        .filter((button) => !(button.id === ENTRY_ID
-          && button.getAttribute(OWNED_ATTRIBUTE) === "true")) : [];
-    const headerReference = headerButtons.length === 1 && !modernScroll?.contains(headerButtons[0])
+        .filter((button) => visibleNativeRow(button)
+          && button.closest('nav[role="navigation"][aria-label]') === navigation
+          && !button.closest('[role="menu"], [role="dialog"], dialog')
+          && !(button.id === ENTRY_ID
+            && button.getAttribute(OWNED_ATTRIBUTE) === "true")) : [];
+    const headerReference = headerButtons.length >= 1 && headerButtons.length <= 8
+      && !modernScroll?.contains(headerButtons[0])
       && headerButtons[0].parentElement ? headerButtons[0] : null;
     if (!scroll) {
-      return sidebar?.contains(modernScroll) ? modernReference || headerReference : null;
+      return sidebar?.contains(modernScroll) ? headerReference || modernReference : null;
     }
     const buttons = Array.from(scroll.querySelectorAll("button"));
     const plugin = buttons.find((button) => buttonMatches(button, PLUGIN_LABELS));
@@ -385,8 +395,8 @@
     const group = groups.sort((left, right) => right.children.length - left.children.length)[0];
     const legacyReference = Array.from(group?.children || [])
       .filter((child) => child.tagName === "BUTTON").at(-1) || null;
-    return legacyReference || (scroll.contains(modernReference) ? modernReference : null)
-      || (scroll === modernScroll ? headerReference : null);
+    return legacyReference || (scroll === modernScroll ? headerReference : null)
+      || (scroll.contains(modernReference) ? modernReference : null);
   }
 
   function nativeNavigationChildren(navigation, scroll) {
@@ -416,9 +426,12 @@
     if (scrollHost.length !== 1 || nativeChildren[1] !== scrollHost[0]
       || !headerHost?.contains(reference)) return null;
     const nativeButtons = Array.from(headerHost.querySelectorAll("button.sidebar-item"))
-      .filter((button) => !(button.id === ENTRY_ID
-        && button.getAttribute(OWNED_ATTRIBUTE) === "true"));
-    return nativeButtons.length === 1 && nativeButtons[0] === reference
+      .filter((button) => visibleNativeRow(button)
+        && button.closest('nav[role="navigation"][aria-label]') === navigation
+        && !button.closest('[role="menu"], [role="dialog"], dialog')
+        && !(button.id === ENTRY_ID
+          && button.getAttribute(OWNED_ATTRIBUTE) === "true"));
+    return nativeButtons.length >= 1 && nativeButtons.length <= 8 && nativeButtons.includes(reference)
       ? { navigation, scrollHost: scrollHost[0], headerHost } : null;
   }
 
@@ -2129,8 +2142,8 @@
     if (!clickable || clickable === entry || clickable.closest(`#${ENTRY_ID}`)) return false;
     if (!clickable.closest("aside nav[role='navigation']")) return false;
     if (clickable.hasAttribute("data-app-action-sidebar-section-toggle")) return false;
-    // The validated fixed header row is the native New Chat action. Its identity
-    // survives translations and labels containing keyboard shortcut text.
+    // Every native row in the validated fixed header changes the native page,
+    // including Pro's Your dot. Never depend on its translated/custom label.
     if (headerMountForReference(clickable)) return true;
     if (buttonMatches(clickable, NATIVE_PAGE_LABELS)) return true;
     return Boolean(clickable.closest(

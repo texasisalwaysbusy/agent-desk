@@ -171,6 +171,8 @@ test("read-only renderer shape reports counts without native labels or destinati
       scrollSidebarItems: 2,
       scrollElements: 3,
       scrollDirectChildren: 1,
+      navigationDirectChildren: 1,
+      headerNativeRows: 0,
     });
     assert.equal(JSON.stringify(result.shape).includes("New task"), false);
   } finally { dom.window.close(); }
@@ -233,7 +235,10 @@ test("26.924 fixed-header row qualifies only with one matching navigation and sc
       class="sidebar-item" data-codex-taskboard-owned="true">Agent Desk</button>`);
     assert.equal(normalizeRendererContractProbe(probe(dom)).compatible, true);
     assert.equal(vm.runInContext("findReferenceButton().textContent", context), "New task");
-    header.insertAdjacentHTML("beforeend", '<button class="sidebar-item">Ambiguous</button>');
+    header.insertAdjacentHTML("beforeend", '<button class="sidebar-item">Your dot</button>');
+    assert.equal(normalizeRendererContractProbe(probe(dom)).compatible, true);
+    assert.equal(vm.runInContext("findReferenceButton().textContent", context), "New task");
+    header.parentElement.insertBefore(dom.window.document.createElement("div"), header.nextElementSibling);
     assert.equal(normalizeRendererContractProbe(probe(dom)).compatible, false);
     assert.equal(vm.runInContext("findReferenceButton()", context), null);
   } finally { dom.window.close(); }

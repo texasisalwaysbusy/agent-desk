@@ -3,7 +3,7 @@
 
   const GLOBAL_KEY = "__codexTaskboardQuotaDisplay__";
   const HOST_ID = "codex-taskboard-quota-display";
-  const VERSION = "1.0.14";
+  const VERSION = "1.0.15";
   // Tune this single curve. Stops are remaining percentage, never spatial stops.
   // Public-domain OKLab matrices by Bjorn Ottosson; attribution in docs/quota-visuals.md.
   const COLOR_STOPS = [
@@ -279,10 +279,14 @@
         ? nativeChildren[0] : null;
       const headerButtons = Array.from(header?.querySelectorAll("button.sidebar-item") || []).filter((button) => !(
         button.id === "codex-taskboard-entry" && button.getAttribute("data-codex-taskboard-owned") === "true"
-      ));
+      ) && !button.closest('[hidden], [inert], [aria-hidden="true"]')
+        && getComputedStyle(button).display !== "none" && getComputedStyle(button).visibility !== "hidden"
+        && button.getBoundingClientRect().width > 0 && button.getBoundingClientRect().height > 0
+        && button.closest('nav[role="navigation"][aria-label]') === navigation
+        && !button.closest('[role="menu"], [role="dialog"], dialog'));
       if (!scroller.matches(SCROLLER_SELECTOR)
         && !scroller.querySelector("button.sidebar-item, a.sidebar-item[href]")
-        && headerButtons.length !== 1) return reject("reference");
+        && !(headerButtons.length >= 1 && headerButtons.length <= 8)) return reject("reference");
       state.placement.reason = "mounted";
       return { anchor: branches[0], navigation };
     }

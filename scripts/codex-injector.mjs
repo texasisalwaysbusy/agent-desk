@@ -111,7 +111,7 @@ function logLaunchDiagnostic(event, details = {}) {
     "quota-trace",
     "workbench-trace",
     "workbench-health",
-    "frame-bootstrap", "process-observation",
+    "frame-bootstrap", "process-observation", "renderer-discovery-health",
   ].includes(event)) return;
   const line = JSON.stringify({
     launchDiagnostic: {
@@ -123,6 +123,10 @@ function logLaunchDiagnostic(event, details = {}) {
         ? { observation: details.observation } : {}),
       ...(Number.isInteger(details.observationFailures) && details.observationFailures >= 0 && details.observationFailures <= 3
         ? { observationFailures: details.observationFailures } : {}),
+      ...(Number.isInteger(details.discoveryFailures) && details.discoveryFailures >= 0 && details.discoveryFailures <= 6
+        ? { discoveryFailures: details.discoveryFailures } : {}),
+      ...(Number.isInteger(details.elapsedMs) && details.elapsedMs >= 0 && details.elapsedMs <= 30_000
+        ? { elapsedMs: details.elapsedMs } : {}),
       ...(event === "quota-trace" ? { trace: sanitizeQuotaTrace(details.trace) } : {}),
       ...(event === "workbench-trace" ? { trace: sanitizeWorkbenchTrace(details.trace) } : {}),
       ...(event === "workbench-health" && ["ready", "loading", "error", "inactive"].includes(details.health)
@@ -167,7 +171,7 @@ function logLaunchDiagnostic(event, details = {}) {
           ...Object.fromEntries([
             "navigationElements", "navigationButtons", "navigationLinks", "navigationRoleButtons",
             "scrollButtons", "scrollLinks", "scrollRoleButtons", "scrollSidebarItems",
-            "scrollElements", "scrollDirectChildren",
+            "scrollElements", "scrollDirectChildren", "navigationDirectChildren", "headerNativeRows",
           ].filter((key) => Number.isInteger(details.shape[key])
             && details.shape[key] >= 0 && details.shape[key] <= 1000)
             .map((key) => [key, details.shape[key]])),
@@ -180,7 +184,7 @@ function logLaunchDiagnostic(event, details = {}) {
       ].includes(details.reason)
         ? { reason: details.reason }
         : {}),
-      ...(typeof details.stage === "string" && ["browser-version", "target-discovery"].includes(details.stage)
+      ...(typeof details.stage === "string" && ["browser-version", "target-discovery", "target-fetch", "target-body"].includes(details.stage)
         ? { stage: details.stage }
         : {}),
       ...(typeof details.signal === "string" && /^SIG[A-Z0-9]{1,24}$/.test(details.signal)
@@ -2440,6 +2444,7 @@ async function main() {
           processObserver,
           onDiscovery: (discovery) => logLaunchDiagnostic("renderer-discovery", discovery),
           onObservation: (state) => logLaunchDiagnostic("process-observation", state),
+          onDiscoveryObservation: (state) => logLaunchDiagnostic("renderer-discovery-health", state),
         });
       } catch (error) {
         const reason = error.diagnosticReason === "codex-running" ? "codex-running" : "activation-failed";

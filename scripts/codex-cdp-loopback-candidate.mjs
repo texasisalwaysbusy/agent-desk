@@ -277,6 +277,7 @@ export function createLoopbackCandidateRuntime(port, pid, {
   connectSocket = (url) => new CdpLoopbackConnection(url),
   processObserver = null,
   onObservation = () => {},
+  onDiscoveryObservation = () => {}, now = Date.now,
 } = {}) {
   let healthy = true;
   let closed = false;
@@ -285,6 +286,24 @@ export function createLoopbackCandidateRuntime(port, pid, {
   let terminalError = null;
   let processExited = false;
   let previousDiscovery = null;
+  let discoveryFailures = 0;
+  let discoveryStartedAt = 0;
+  let discoveryRetryAt = 0;
+  let discoveryStage = "target-fetch";
+  const discoveryPending = () => Object.assign(
+    new Error("Codex target discovery deferred; existing connections retained"),
+    { discoveryPending: true },
+  );
+  const discoveryEvent = (observation, stage) => onDiscoveryObservation({
+    observation, stage, discoveryFailures,
+    elapsedMs: Math.min(30_000, Math.max(0, now() - discoveryStartedAt)),
+  });
+  const failDiscovery = (stage) => {
+    healthy = false;
+    terminalError = new Error("Codex target discovery unavailable");
+    discoveryEvent("failed", stage);
+    return terminalError;
+  };
   const connections = new Set();
   const observe = async () => {
     if (closed) throw new Error("Codex runtime closed");
@@ -319,15 +338,26 @@ export function createLoopbackCandidateRuntime(port, pid, {
   };
   return {
     async targets() {
+      let stage = "process-observation";
       try {
         const state = await observe();
         if (!state.processAlive) { processExited = true; healthy = false; return []; }
         if (!state.listenerOwned) throw new Error("Codex CDP listener ownership changed");
+        if (discoveryFailures) {
+          if (now() - discoveryStartedAt >= 30_000) throw failDiscovery(discoveryStage);
+          if (now() < discoveryRetryAt) throw discoveryPending();
+        }
+        stage = "target-fetch";
         const response = await fetchTargets(`http://127.0.0.1:${port}/json/list`, {
           signal: AbortSignal.timeout(2_000), redirect: "error",
         });
-        if (!response.ok) throw new Error("Codex CDP target discovery failed");
+        if (closed || terminalError) throw terminalError || new Error("Codex runtime closed");
+        if (!response.ok) throw Object.assign(new Error("Codex CDP target discovery failed"), {
+          discoveryRetryable: [429, 500, 502, 503, 504].includes(response.status),
+        });
+        stage = "target-body";
         const targets = await response.json();
+        if (closed || terminalError) throw terminalError || new Error("Codex runtime closed");
         if (!Array.isArray(targets) || targets.length > 128) throw new Error("Invalid or excessive Codex CDP targets");
         const eligible = targets.filter((target) => target?.type === "page"
           && typeof target.url === "string"
@@ -346,20 +376,47 @@ export function createLoopbackCandidateRuntime(port, pid, {
           onDiscovery(discovery);
           previousDiscovery = fingerprint;
         }
+        if (discoveryFailures) discoveryEvent("recovered", stage);
+        discoveryFailures = 0;
+        discoveryRetryAt = 0;
         return eligible.map((target) => ({ ...target, targetId: target.id }));
       } catch (error) {
-        if (!error.observationPending) { healthy = false; terminalError ??= error; }
-        throw error;
+        if (closed) throw new Error("Codex runtime closed");
+        if (error.observationPending || error.discoveryPending) throw error;
+        // HTTP enumeration is separate from ownership and existing CDP sockets.
+        // Never return cached/empty targets or connect new targets while uncertain.
+        const retryable = error.discoveryRetryable === true
+          || ["TimeoutError", "AbortError"].includes(error.name)
+          || ["ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "UND_ERR_CONNECT_TIMEOUT",
+            "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT", "UND_ERR_SOCKET"].includes(error.cause?.code);
+        if (!closed && !terminalError && stage !== "process-observation" && retryable) {
+          if (!discoveryFailures) discoveryStartedAt = now();
+          discoveryStage = stage;
+          discoveryFailures++;
+          if (discoveryFailures >= 6 || now() - discoveryStartedAt >= 30_000) throw failDiscovery(stage);
+          discoveryRetryAt = now() + Math.min(8_000, 2_000 * 2 ** (discoveryFailures - 1));
+          discoveryEvent("timeout", stage);
+          throw discoveryPending();
+        }
+        healthy = false;
+        terminalError ??= stage === "process-observation" ? error
+          : new Error("Invalid or unavailable Codex target discovery response");
+        throw terminalError;
       }
     },
     async connect(target) {
       const state = await observe();
       if (!state.processAlive) { processExited = true; healthy = false; throw new Error("Registered Codex exited"); }
       if (!state.listenerOwned) { healthy = false; throw new Error("Codex CDP listener ownership changed"); }
+      if (discoveryFailures) throw discoveryPending();
       const connection = connectSocket(validateLoopbackTarget(target, port));
-      try { await connection.ready; }
-      catch (error) { connection.close(); throw error; }
       connections.add(connection);
+      try { await connection.ready; }
+      catch (error) { connections.delete(connection); connection.close(); throw error; }
+      if (closed || terminalError || !healthy || !this.isHealthy()) {
+        connections.delete(connection); connection.close();
+        throw terminalError || new Error("Codex runtime closed");
+      }
       connection.socket?.addEventListener("close", () => connections.delete(connection), { once: true });
       return connection;
     },

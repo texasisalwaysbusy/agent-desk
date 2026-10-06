@@ -1,6 +1,20 @@
 # Changelog / 更新日志
 
-## 1.2.3 · Pending publication / 待发布
+## 1.2.4 · Pending publication / 待发布
+
+- Restore injection on updated Codex / Pro sidebars with additional native header rows, including Your dot.
+- Add bounded target-discovery recovery for transient HTTP failures without weakening identity checks or changing transports.
+- Include accepted navigation/frame-lifecycle, existing-conversation entry, approval archival and glass quota improvements from the unpublished 1.2.3 candidate.
+- Six external supervision phases completed approximately 5.5 hours without recorded functional failures; the user accepted the observed scope and confirmed workbench/quota before shutdown. Final wrap-up and normal-exit checks were not run; preserve partial diagnostic coverage and unobserved intervals.
+- Windows x64 unsigned Release installer and SHA-256 checksums. [Bilingual release notes](docs/release-1.2.4.md).
+
+- 兼容新版 Codex / Pro 含 Your dot 的多行原生侧栏，恢复入口与额度注入。
+- 短暂 HTTP 目标发现错误可有界恢复，身份检查与调试通道边界保持不变。
+- 汇入未发行 1.2.3 候选的切页/帧生命周期、已有对话入口、审批归档和玻璃额度修复。
+- 六段外部监督合计约 5.5 小时无功能失败记录；用户确认关机前工作台与额度正常，接受该范围。收尾复合与正常退出未执行，保留诊断部分覆盖及未观察时段。
+- Windows x64 未签名 Release 安装包及 SHA-256 校验。[完整说明](docs/release-1.2.4.md)。
+
+## 1.2.3 · Historical unpublished tag / 保留的未发行标签
 
 - Recover the workbench and quota after Scheduled/Settings navigation. Park on unsupported routes and restore the native page before an explicit reopen.
 - Open directly from existing conversations; keep the entry in its own aligned native sidebar row with matching type and a discreet arrow.

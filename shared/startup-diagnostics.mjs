@@ -19,8 +19,9 @@ const allowedEvents = new Set([
   "workbench-health",
   "process-observation",
   "frame-bootstrap",
+  "renderer-discovery-health",
 ]);
-const allowedStages = new Set(["browser-version", "target-discovery"]);
+const allowedStages = new Set(["browser-version", "target-discovery", "target-fetch", "target-body"]);
 
 export function sanitizeStartupDiagnostic(line) {
   let source;
@@ -76,6 +77,8 @@ export function sanitizeStartupDiagnostic(line) {
   if (["ready", "timeout", "invalidated", "contract-refused", "frame-refused", "failed", "busy"].includes(source.bootstrap)) result.bootstrap = source.bootstrap;
   if (["timeout", "recovered", "failed"].includes(source.observation)) result.observation = source.observation;
   if (Number.isInteger(source.observationFailures) && source.observationFailures >= 0 && source.observationFailures <= 3) result.observationFailures = source.observationFailures;
+  if (Number.isInteger(source.discoveryFailures) && source.discoveryFailures >= 0 && source.discoveryFailures <= 6) result.discoveryFailures = source.discoveryFailures;
+  if (Number.isInteger(source.elapsedMs) && source.elapsedMs >= 0 && source.elapsedMs <= 30_000) result.elapsedMs = source.elapsedMs;
   if ([
     "before-injection", "connection-lost", "renderer-contract-mismatch",
     "invalid-probe-result", "probe-evaluation-failed", "probe-transport-failed",
@@ -99,7 +102,7 @@ export function sanitizeStartupDiagnostic(line) {
       ...Object.fromEntries([
         "navigationElements", "navigationButtons", "navigationLinks", "navigationRoleButtons",
         "scrollButtons", "scrollLinks", "scrollRoleButtons", "scrollSidebarItems",
-        "scrollElements", "scrollDirectChildren",
+        "scrollElements", "scrollDirectChildren", "navigationDirectChildren", "headerNativeRows",
       ].filter((key) => Number.isInteger(source.shape[key])
         && source.shape[key] >= 0 && source.shape[key] <= 1000)
         .map((key) => [key, source.shape[key]])),

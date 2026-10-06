@@ -87,6 +87,23 @@ test("slow native conversation metadata cannot block a panel, and native New Cha
   } finally { h.dispose(); }
 });
 
+test("Pro header rows close the ready panel without depending on a dot nickname or New Chat first", async () => {
+  const h = fixture({ contextStalled: true });
+  try {
+    const header = h.w.document.querySelector("nav > div");
+    header.insertAdjacentHTML("beforeend", '<button class="sidebar-item"><span>PRIVATE_CUSTOM_DOT_NAME</span></button>');
+    const dot = header.lastElementChild;
+    h.api.refresh();
+    h.api.open(); await until(() => h.api.ready);
+    dot.click();
+    assert.equal(h.api.diagnostics().events.at(-1).active, false);
+    h.api.open(); await until(() => h.api.ready);
+    assert.equal(h.frames.length, 1);
+    assert.equal(h.w.document.querySelectorAll("#codex-taskboard-entry").length, 1);
+    assert.equal(h.w.document.getElementById("codex-taskboard-entry").parentElement, header.parentElement);
+  } finally { h.dispose(); }
+});
+
 test("native surface replacement resets frame authority and rejects a stale ready handshake", async () => {
   const h = fixture({ contextStalled: true });
   try {

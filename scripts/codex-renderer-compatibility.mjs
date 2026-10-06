@@ -17,6 +17,9 @@ const rendererContractProbeExpression = String.raw`(() => {
   const visibleFlow = (candidate) => candidate && !candidate.closest('[hidden], [inert], [aria-hidden="true"]')
     && getComputedStyle(candidate).display !== "none" && getComputedStyle(candidate).visibility !== "hidden"
     && candidate.getBoundingClientRect().width >= 100;
+  const visibleRow = (candidate) => candidate && !candidate.closest('[hidden], [inert], [aria-hidden="true"]')
+    && getComputedStyle(candidate).display !== "none" && getComputedStyle(candidate).visibility !== "hidden"
+    && candidate.getBoundingClientRect().width > 0 && candidate.getBoundingClientRect().height > 0;
   const legacyScrolls = Array.from(document.querySelectorAll(
     "[data-app-action-sidebar-scroll]",
   )).filter((candidate) => visibleSidebar(candidate.closest("aside")) && visibleFlow(candidate));
@@ -79,8 +82,9 @@ const rendererContractProbeExpression = String.raw`(() => {
   const modernButton = modernScroll?.querySelector("button.sidebar-item");
   const modernLink = modernScroll?.querySelector("a.sidebar-item[href]");
   const modernReference = modernScroll?.querySelector("button.sidebar-item, a.sidebar-item[href]");
-  // In the 26.924 shell the fixed navigation header precedes the thread scroller.
-  // Require their unique direct-child relationship before accepting its native row.
+  // The fixed navigation header precedes the thread scroller. Pro can add rows
+  // (Your dot) to that same header; row count is not header identity. The first
+  // visible native row supplies appearance only, never an action or destination.
   const scrollHosts = modernNavigation && modernScroll
     ? Array.from(modernNavigation.children).filter((child) => child.contains(modernScroll)) : [];
   const scrollHost = scrollHosts.length === 1 ? scrollHosts[0] : null;
@@ -103,9 +107,13 @@ const rendererContractProbeExpression = String.raw`(() => {
     ? nativeNavigationChildren[0] : null;
   const headerButtons = headerHost
     ? Array.from(headerHost.querySelectorAll("button.sidebar-item"))
-      .filter((button) => !(button.id === "codex-taskboard-entry"
-        && button.getAttribute("data-codex-taskboard-owned") === "true")) : [];
-  const headerReference = headerButtons.length === 1 && !modernScroll?.contains(headerButtons[0])
+      .filter((button) => visibleRow(button)
+        && button.closest('nav[role="navigation"][aria-label]') === modernNavigation
+        && !button.closest('[role="menu"], [role="dialog"], dialog')
+        && !(button.id === "codex-taskboard-entry"
+          && button.getAttribute("data-codex-taskboard-owned") === "true")) : [];
+  const headerReference = headerButtons.length >= 1 && headerButtons.length <= 8
+    && !modernScroll?.contains(headerButtons[0])
     && Boolean(headerButtons[0].parentElement);
   const legacyReference = Boolean(pluginButton?.parentElement
     || Array.from(fallbackGroup?.children || []).some((child) => child.tagName === "BUTTON"));
@@ -131,6 +139,8 @@ const rendererContractProbeExpression = String.raw`(() => {
     scrollSidebarItems: count(sidebarScroll, ".sidebar-item"),
     scrollElements: count(sidebarScroll, "*"),
     scrollDirectChildren: Math.min(sidebarScroll?.children.length || 0, 1000),
+    navigationDirectChildren: Math.min(nativeNavigationChildren.length, 1000),
+    headerNativeRows: Math.min(headerButtons.length, 1000),
   };
   const fullPanel = Boolean(appProtocol && topFrame && sidebarScroll && pageMount && referenceButton);
   return {
@@ -213,7 +223,7 @@ function normalizeRendererContractProbe(value) {
   const shapeKeys = [
     "navigationElements", "navigationButtons", "navigationLinks", "navigationRoleButtons",
     "scrollButtons", "scrollLinks", "scrollRoleButtons", "scrollSidebarItems",
-    "scrollElements", "scrollDirectChildren",
+    "scrollElements", "scrollDirectChildren", "navigationDirectChildren", "headerNativeRows",
   ];
   const shape = {
     ...(typeof value.shape?.sameScroll === "boolean"
