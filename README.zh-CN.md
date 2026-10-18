@@ -8,7 +8,13 @@ Agent Desk 是嵌入 Windows 官方 Codex 桌面应用的本地项目工作台�
 
 如果你同时推进多个项目，或者把工作分给不同智能体，它能让“聊过什么”逐渐变成“谁在做、做到哪、还缺什么、谁来验收”。
 
-![四种项目视图：实际界面、虚构数据、中英双语说明](docs/assets/workspace-preview.png)
+![仪表盘 / Dashboard](docs/assets/workspace-dashboard.png)
+
+![看板 / Board](docs/assets/workspace-board.png)
+
+![列表 / List](docs/assets/workspace-list.png)
+
+![时间线 / Timeline](docs/assets/workspace-gantt.png)
 
 *实际 1.2.5 项目界面，使用本地虚构演示数据；未展示真实项目、账户或智能体运行，不是 Codex 宿主截图。*
 

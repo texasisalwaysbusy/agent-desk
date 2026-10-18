@@ -14,7 +14,13 @@ Two windows, reset countdowns, one continuous state colour. [Details](usage-allo
 
 ## Choose the view for the decision / 用合适的视图做决定
 
-![Four project views with bilingual captions](assets/workspace-preview.png)
+![仪表盘 / Dashboard](assets/workspace-dashboard.png)
+
+![看板 / Board](assets/workspace-board.png)
+
+![列表 / List](assets/workspace-list.png)
+
+![时间线 / Timeline](assets/workspace-gantt.png)
 
 Dashboard for attention, board for stages, list for detail, timeline for dates. Owners and status record work; they do not prove an agent is currently running.
 

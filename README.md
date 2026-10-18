@@ -10,7 +10,13 @@ Agent Desk is a local project workspace inside the official Codex desktop app on
 
 It is independently maintained and derived from Dashi Taskboard. It is not an OpenAI product or an official upstream release. [Attribution](NOTICE) · [License](docs/licensing.md)
 
-![Four complementary project views with bilingual captions and fictional tasks](docs/assets/workspace-preview.png)
+![仪表盘 / Dashboard](docs/assets/workspace-dashboard.png)
+
+![看板 / Board](docs/assets/workspace-board.png)
+
+![列表 / List](docs/assets/workspace-list.png)
+
+![时间线 / Timeline](docs/assets/workspace-gantt.png)
 
 *Actual 1.2.5 project UI with fictional demo data, rendered locally. Bilingual captions explain each view; no real projects, accounts or agent runs are shown.*
 

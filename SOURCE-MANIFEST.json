@@ -29,11 +29,11 @@
   },
   {
     "path": "README.md",
-    "sha256": "3ac41c45029efc15d23d7aea4d95559f38d5a3b4bc06a3f44d7d422fed3a7051"
+    "sha256": "6f102c340b626c757977ae45e8801e0e2cc3acef8e4e64e36c422584082f2c88"
   },
   {
     "path": "README.zh-CN.md",
-    "sha256": "fecdaa03846519240c9b9398ccf146a0db0db4eaf560ea706a623ea1f51b7c80"
+    "sha256": "ff84c230195f04dfd0a284b45ebd23317fc7639e8096254428db45a884d4ca2c"
   },
   {
     "path": "cli/agentdesk.mjs",
@@ -80,6 +80,22 @@
     "sha256": "f01658bd9b0b08bb6d021a0a2623ecb9b03b44542dc1c125debd882db03818c7"
   },
   {
+    "path": "docs/assets/workspace-board.png",
+    "sha256": "48006b778bb09ae6ed83abd27dbe094887b95fa0b30113efda0bc6ed6c7c3f8e"
+  },
+  {
+    "path": "docs/assets/workspace-dashboard.png",
+    "sha256": "6c0da0225563fb3f3e0ef644f31ec61bbe6f2d44d05f318d8a1c0c830f60ea2e"
+  },
+  {
+    "path": "docs/assets/workspace-gantt.png",
+    "sha256": "e11ae3efc2f8b2c5ce556f3a741c8f58257e1dde723068fccf0f1727bda6ece3"
+  },
+  {
+    "path": "docs/assets/workspace-list.png",
+    "sha256": "d0b1d179aabbd49b4b813e60116fd79c5074166e9edeef3438a5cb2dad86b8b5"
+  },
+  {
     "path": "docs/assets/workspace-preview.png",
     "sha256": "b34e9d9c5971f68aa216741ec63a0ed69210a46354de8380770d5948d843d248"
   },
@@ -117,7 +133,7 @@
   },
   {
     "path": "docs/showcase.md",
-    "sha256": "a856c28e45909b8203431f2236d56d8d929ca5e07838cd07ae5ae444137211b7"
+    "sha256": "a4016fd02d29f19aa53c5338f29e2d77070775544576ac25b494b5ba1f37e371"
   },
   {
     "path": "docs/startup-diagnostics.md",
