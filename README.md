@@ -26,6 +26,14 @@ It is independently maintained and derived from Dashi Taskboard. It is not an Op
 | Review an agent handoff | Inspect the proposed operations and risks through a separately configured local approval integration. |
 | Pace longer sessions | Read remaining 5-hour and weekly usage allowances and reset countdowns in the native sidebar. |
 
+### See usage allowances and reset times
+
+![Legacy Agent Desk allowance preview showing Chinese and English sidebars with fictional data](docs/assets/allowance-preview.png)
+
+The native sidebar shows remaining 5-hour and weekly usage percentages and reset countdowns, helping you pace longer sessions. These are usage limits, not a cash balance.
+
+*Legacy preview: the actual borderless quota component (1.0.6) rendered with fictional data in illustrative Chinese and English sidebars. It contains no real account information and is not a current-version or full Codex client screenshot.*
+
 ### Keep the workflow visible
 
 ![Task board with fictional tasks assigned to a person and two agents](docs/assets/showcase-board.png)
