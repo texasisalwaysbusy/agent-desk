@@ -1,5 +1,7 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
+mod native_observer;
+
 #[cfg(target_os = "macos")]
 use objc2_app_kit::NSRunningApplication;
 use serde::{Deserialize, Serialize};
@@ -1101,15 +1103,21 @@ fn watch_launcher_output<R: std::io::Read + Send + 'static>(
                             "Codex 未提供可用主界面，已停止等待。详情见启动诊断日志。".into();
                     }
                 });
-            } else if !is_stderr && line.contains("\"event\":\"startup-failed\"") {
+            } else if !is_stderr
+                && (line.contains(r#""event":"startup-failed""#)
+                    || line.contains(r#""event":"runtime-failed""#))
+            {
                 update_snapshot(&app, &state, |snapshot| {
                     if state.generation.load(Ordering::SeqCst) == generation
                         && snapshot.child_pid == Some(pid)
                     {
                         snapshot.phase = "error".into();
-                        snapshot.message =
+                        snapshot.message = if line.contains(r#""event":"runtime-failed""#) {
+                            "Agent Desk 运行中的安全观测或连接失效，已停止注入。详情见启动诊断记录。".into()
+                        } else {
                             "Codex 未完成启动，Agent Desk 已停止自动重试。请查看官方错误提示。"
-                                .into();
+                                .into()
+                        };
                     }
                 });
             }
@@ -1256,6 +1264,10 @@ fn start_launcher_locked(
     command
         .env("CODEX_TASKBOARD_CODEX_VERSION", &codex_package_version)
         .env("AGENT_DESK_WINDOWS_TRANSPORT", "registered-loopback")
+        .env(
+            "CODEX_TASKBOARD_OBSERVER_EXECUTABLE",
+            std::env::current_exe().map_err(|_| "启动器路径不可用".to_string())?,
+        )
         .env_remove("AGENT_DESK_LOOPBACK_CANDIDATE");
     command
         .env("CODEX_TASKBOARD_SKILL_PATH", &manage_taskboard_skill_path)
@@ -1595,6 +1607,9 @@ mod identity_tests {
 }
 
 fn main() {
+    if let Some(code) = native_observer::try_main() {
+        std::process::exit(code);
+    }
     let app = tauri::Builder::default()
         .enable_macos_default_menu(false)
         .plugin(tauri_plugin_autostart::init(

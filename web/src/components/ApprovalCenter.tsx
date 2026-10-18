@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { requestApproval, type ApprovalDetail, type ApprovalItem, type ApprovalOperation } from "../approvalBridge";
+import { patchReviewMessages, reviewApprovalPatches } from "../approvalPatchReview";
 
 const labels: Record<string, string> = { pending: "待审批", approved: "已批准 · 等待继续", succeeded: "已完成", running: "执行中",
   failed: "执行失败", revoked: "已撤销 / 已退回", outdated: "协议已更新", invalid: "无法核验",
@@ -82,6 +83,7 @@ export function ApprovalCenter({ challenge, project }: { challenge: string; proj
 
   async function decide(event: React.MouseEvent<HTMLButtonElement>, decision: string) {
     if (!event.isTrusted || !detail || busy || mutation.current) return;
+    if (decision === "approve" && reviewApprovalPatches(detail).some(p => p.state !== "complete")) return;
     const gen = generation.current;
     mutation.current = true; setBusy(true); setError("");
     try {
@@ -97,7 +99,10 @@ export function ApprovalCenter({ challenge, project }: { challenge: string; proj
   const status = detail?.status;
   const allPending = status?.operations.every((op) => op.state === "pending");
   const risks = Object.entries(status?.risk_findings ?? {}).filter(([, reasons]) => reasons.length > 0).map(([id]) => id);
-  const canApprove = status?.protocol_current && !status.revoked_at && allPending && !status.approved_at;
+  const canReview = status?.protocol_current && !status.revoked_at && allPending && !status.approved_at;
+  const patchReviews = detail ? reviewApprovalPatches(detail) : [];
+  const incompletePatches = patchReviews.some(p => p.state !== "complete");
+  const canApprove = canReview && !incompletePatches;
   const pendingItems = items.filter((item) => !item.archived && item.state === "pending");
   const archivedItems = items.filter((item) => item.archived);
   const visible = filter === "archived" ? archivedItems : filter === "all" ? items.filter((item) => !item.archived) : pendingItems;
@@ -134,20 +139,28 @@ export function ApprovalCenter({ challenge, project }: { challenge: string; proj
           {!status.protocol_current && <div className="approval-alert">此任务属于旧协议，仅供查看。请发送新任务包重新审查。</div>}
           {status.revoked_at && <div className="approval-notice">此任务已撤销或退回，不能继续执行未开始的操作。</div>}
           {status.approved_at && <div className="approval-notice">批准已登记：{new Date(status.approved_at).toLocaleString("zh-CN")}</div>}
+          {!!patchReviews.length && <section aria-label="差异材料审查"><h3>差异材料 · 共用文件只展示一次</h3>
+            <p>按文件路径与声明的摘要区分材料，关联操作见下方。完整展示不代表已经执行，也不代替人工风险复核。</p>
+            {incompletePatches && <p className="approval-alert" role="status">差异材料尚未完整核验，暂不能批准。仍可填写原因并退回修改或拒绝。</p>}
+            {patchReviews.map((p, i) => <section className="approval-operation" id={`approval-patch-${i}`} key={JSON.stringify([p.path, p.hash, p.operations])}>
+              <strong>文件差异：{p.path}</strong><p>适用操作：{p.operations.join("、")} · 声明 SHA-256：{p.hash || "无法核对"}</p>
+              {p.text && <pre>{p.text}</pre>}<p className={p.state === "complete" ? "approval-verified" : p.state === "preview" ? "approval-notice" : "approval-alert"}>{patchReviewMessages[p.state]}</p>
+            </section>)}
+          </section>}
           <h3>将要执行的操作</h3>
           {status.package.operations.map((op, index) => <section className="approval-operation" key={op.id}>
             <div className="approval-operation-title"><strong>{index + 1}. {operationTitle(op)}</strong><span className="approval-state">{status.approved_at && status.operations.find((s) => s.id === op.id)?.state === "pending" ? "待执行" : labels[status.operations.find((s) => s.id === op.id)?.state ?? "pending"] || "待执行"}</span></div>
             <p><span className="approval-eyebrow">声明的影响</span><br />{op.effects}</p>
             {!(status.risk_findings[op.id]?.length) ? <p className="approval-verified">接收端识别为有限的版本/状态查询，无需额外风险复核。</p> : <div className="approval-risk"><strong>需要人工复核</strong><ul>{status.risk_findings[op.id].map((r) => <li key={r}>{riskLabels[r] || "尚未核实的风险，请查看技术详情。"}</li>)}</ul>
-              {canApprove && <label><input type="checkbox" checked={reviewed.includes(op.id)} onChange={(e) => setReviewed(e.target.checked ? [...reviewed, op.id] : reviewed.filter((id) => id !== op.id))} /> 我已核对该操作的影响与范围</label>}</div>}
-            {detail.patches?.filter((p) => p.operation === op.id).map((p) => <section key={p.path}><strong>文件差异：{p.path}</strong><p>“−”为删除行，“+”为新增行。差异来自声明的输入文件，不代表已执行。</p><pre>{p.text}</pre>{p.truncated && <p className="approval-alert">差异未完整展示或已变化，请退回补充后再批准。</p>}</section>)}
+              {canReview && <label><input type="checkbox" checked={reviewed.includes(op.id)} onChange={(e) => setReviewed(e.target.checked ? [...reviewed, op.id] : reviewed.filter((id) => id !== op.id))} /> 我已核对该操作的影响与范围</label>}</div>}
+            {patchReviews.map((p, i) => p.operations.includes(op.id) ? <p key={i}><a href={`#approval-patch-${i}`}>查看共用差异：{p.path}</a></p> : null)}
             {!!status.risk_findings[op.id]?.length && <p>删除目标、发送位置或文件影响若未在上方说明中列清，请退回补充；系统不会从任意脚本猜测完整影响。</p>}
             <details><summary>查看命令与文件校验详情</summary><pre>{JSON.stringify(op, null, 2)}</pre></details>
           </section>)}
           <p className="approval-boundary">当前没有操作系统级文件或网络隔离。中文说明不构成安全证明；无法核实的影响可以退回补充。</p>
-          {(canApprove || (!status.revoked_at && status.operations.some((op) => op.state === "pending"))) && <div className="approval-actions">
+          {(canReview || (!status.revoked_at && status.operations.some((op) => op.state === "pending"))) && <div className="approval-actions">
             <label htmlFor="approval-reason">备注 / 退回原因</label><textarea id="approval-reason" maxLength={2000} value={reason} onChange={(e) => setReason(e.target.value)} placeholder="例如：请列出将删除的文件，或补充修改前后差异。" />
-            <div>{canApprove && <><button className="button primary" disabled={busy || risks.some((id) => !reviewed.includes(id))} onClick={(e) => void decide(e, "approve")}>批准本次任务</button><button className="button secondary" disabled={busy || !reason.trim()} onClick={(e) => void decide(e, "return")}>退回修改</button><button className="button secondary" disabled={busy || !reason.trim()} onClick={(e) => void decide(e, "reject")}>拒绝</button></>}
+            <div>{canReview && <><button className="button primary" disabled={busy || !canApprove || risks.some((id) => !reviewed.includes(id))} onClick={(e) => void decide(e, "approve")}>批准本次任务</button><button className="button secondary" disabled={busy || !reason.trim()} onClick={(e) => void decide(e, "return")}>退回修改</button><button className="button secondary" disabled={busy || !reason.trim()} onClick={(e) => void decide(e, "reject")}>拒绝</button></>}
             {status.approved_at && !status.revoked_at && <button className="button secondary" disabled={busy} onClick={(e) => void decide(e, "revoke")}>撤销未执行的授权</button>}</div>
           </div>}
           {!!detail.outputs.length && <><h3>已核对的执行输出</h3>{detail.outputs.map((out) => <section className="approval-operation" key={out.id}><strong>{out.id} · 退出码 {out.exit_code}</strong><pre>{out.text}</pre>{out.truncated && <small>仅显示前 16 KiB；完整输出保存在本地。</small>}</section>)}</>}

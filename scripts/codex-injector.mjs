@@ -44,8 +44,8 @@ import {
   activateRegisteredCodex,
   createLoopbackCandidateRuntime,
   reserveLoopbackPort,
-  watchRegisteredProcess,
 } from "./codex-cdp-loopback-candidate.mjs";
+import { watchNativeRegisteredProcess } from "./codex-process-observer.mjs";
 import { readNativeModelCatalog } from "./codex-model-catalog.mjs";
 import { createApprovalAdapter } from "./handoff-approval.mjs";
 import { createQuotaObserver } from "./codex-quota-observer.mjs";
@@ -105,7 +105,7 @@ function logLaunchDiagnostic(event, details = {}) {
     "spawn-started", "spawn-returned", "codex-exited", "cdp-output-ended",
     "cdp-handshake", "cdp-ready", "renderer-discovery", "renderer-waiting",
     "renderer-probe-start", "renderer-contract", "renderer-timeout",
-    "injection-result", "startup-failed",
+    "injection-result", "startup-failed", "runtime-failed",
     "activation-started", "activation-ready",
     "activation-refused", "activation-failed", "codex-exit-unobserved", "codex-observation-stopping",
     "quota-trace",
@@ -119,8 +119,13 @@ function logLaunchDiagnostic(event, details = {}) {
       event,
       ...(["ready", "timeout", "invalidated", "contract-refused", "frame-refused", "failed", "busy"].includes(details.bootstrap)
         ? { bootstrap: details.bootstrap } : {}),
-      ...(["timeout", "recovered", "failed"].includes(details.observation)
+      ...(["ready", "verified", "timeout", "recovered", "failed"].includes(details.observation)
         ? { observation: details.observation } : {}),
+      ...(details.backend === "native-tcp-table" ? { backend: details.backend } : {}),
+      ...(Number.isSafeInteger(details.observerPid) && details.observerPid > 0 && details.observerPid <= 0xffffffff ? { observerPid: details.observerPid } : {}),
+      ...(Number.isInteger(details.helperExitCode) && details.helperExitCode >= -2147483648 && details.helperExitCode <= 0xffffffff ? { helperExitCode: details.helperExitCode } : {}),
+      ...(Number.isInteger(details.observationSequence) && details.observationSequence > 0 && details.observationSequence <= 1_000_000_000 ? { observationSequence: details.observationSequence } : {}),
+      ...(Number.isInteger(details.nativeCode) && details.nativeCode >= 0 && details.nativeCode <= 0xffffffff ? { nativeCode: details.nativeCode } : {}),
       ...(Number.isInteger(details.observationFailures) && details.observationFailures >= 0 && details.observationFailures <= 3
         ? { observationFailures: details.observationFailures } : {}),
       ...(Number.isInteger(details.discoveryFailures) && details.discoveryFailures >= 0 && details.discoveryFailures <= 6
@@ -179,12 +184,13 @@ function logLaunchDiagnostic(event, details = {}) {
       } : {}),
       ...(typeof details.reason === "string" && [
         "before-injection", "connection-lost", "renderer-contract-mismatch",
+        "process-observation-unavailable", "process-observer-stopped", "listener-misowned", "discovery-unavailable", "helper-timeout", "helper-start-failed", "helper-exit", "helper-protocol", "output-limit", "tcp-table-error", "process-unavailable", "invalid-request",
         "invalid-probe-result", "probe-evaluation-failed", "probe-transport-failed",
         "codex-running", "activation-failed", "launcher-stopped",
       ].includes(details.reason)
         ? { reason: details.reason }
         : {}),
-      ...(typeof details.stage === "string" && ["browser-version", "target-discovery", "target-fetch", "target-body"].includes(details.stage)
+      ...(typeof details.stage === "string" && ["browser-version", "target-discovery", "target-fetch", "target-body", "helper-start", "process-handle", "helper-protocol", "listener-table", "listener-ipv4", "listener-ipv6"].includes(details.stage)
         ? { stage: details.stage }
         : {}),
       ...(typeof details.signal === "string" && /^SIG[A-Z0-9]{1,24}$/.test(details.signal)
@@ -2425,6 +2431,9 @@ async function main() {
       emitWorkbenchTrace = createWorkbenchTraceBudget((trace) => logLaunchDiagnostic("workbench-trace", { trace }));
       logLaunchDiagnostic("activation-started");
       try {
+        if (!process.env.CODEX_TASKBOARD_OBSERVER_EXECUTABLE) {
+          throw new Error("Start through the updated Agent Desk launcher; native observer path is required");
+        }
         const port = await reserveLoopbackPort();
         const activated = activateRegisteredCodex({ port, appPath: options.appPath,
           mode: options.windowsRegistered ? "launcher" : "source-test" });
@@ -2435,13 +2444,18 @@ async function main() {
         logLaunchDiagnostic("spawn-returned", { pid: activated.pid });
         // The registered process is not our child. Never send it a kill signal.
         codexProcess = { pid: activated.pid, exitCode: null, signalCode: null, unref() {} };
-        const processObserver = watchRegisteredProcess(activated.pid);
+        const processObserver = watchNativeRegisteredProcess(activated.pid, port, {
+          ...(process.env.CODEX_TASKBOARD_OBSERVER_EXECUTABLE
+            ? { executable: process.env.CODEX_TASKBOARD_OBSERVER_EXECUTABLE } : {}),
+          onDiagnostic: (state) => logLaunchDiagnostic("process-observation", state),
+        });
         if (!await processObserver.ready) {
           processObserver.close();
           throw new Error("Could not observe the registered Codex lifecycle");
         }
         cdpRuntime = createLoopbackCandidateRuntime(port, activated.pid, {
           processObserver,
+          inspect: () => processObserver.inspect(),
           onDiscovery: (discovery) => logLaunchDiagnostic("renderer-discovery", discovery),
           onObservation: (state) => logLaunchDiagnostic("process-observation", state),
           onDiscoveryObservation: (state) => logLaunchDiagnostic("renderer-discovery-health", state),
@@ -2690,13 +2704,14 @@ async function main() {
 
       if (!cdpRuntime?.isHealthy()) {
         const exitCode = cdpRuntime?.exitCode?.() ?? codexProcess?.exitCode;
+        const failureReason = cdpRuntime?.failureReason?.() || "connection-lost";
         const codexPid = codexProcess?.pid;
         if (options.windowsRegistered || options.windowsLoopbackCandidate) {
           if (Number.isInteger(exitCode)) {
             logLaunchDiagnostic("codex-exited", { pid: codexPid, exitCode,
               exitCodeSource: "registered-process-handle" });
           } else {
-            logLaunchDiagnostic("codex-exit-unobserved", { pid: codexPid, reason: "connection-lost" });
+            logLaunchDiagnostic("codex-exit-unobserved", { pid: codexPid, reason: failureReason });
           }
         }
         await detachAll();
@@ -2714,12 +2729,14 @@ async function main() {
           console.error("Waiting after normal Codex exit; use the tray or plugin to restart it.");
         } else {
           openedRequestGeneration = openRequestGeneration;
-          logLaunchDiagnostic("startup-failed", {
+          logLaunchDiagnostic(injectedOnce ? "runtime-failed" : "startup-failed", {
             pid: codexPid,
             exitCode,
-            reason: exitCode === 0 ? "before-injection" : "connection-lost",
+            reason: exitCode === 0 ? "before-injection" : failureReason,
           });
-          console.error("Codex did not complete Agent Desk startup; automatic retries stopped.");
+          console.error(injectedOnce
+            ? "Agent Desk runtime observation or connection failed; injection stopped."
+            : "Codex did not complete Agent Desk startup; automatic retries stopped.");
           process.exitCode = 1;
           requestStop({ preserveCodex: exitCode === null });
         }

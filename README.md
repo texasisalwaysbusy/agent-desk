@@ -4,15 +4,15 @@
 
 **把分散的智能体对话，组织成可追踪、可审阅、可完成的项目。**
 
-[Download for Windows](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.4) · [简体中文](README.zh-CN.md) · [Screenshots](docs/showcase.md) · [Changelog](CHANGELOG.md)
+[Download for Windows](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.5) · [简体中文](README.zh-CN.md) · [Screenshots](docs/showcase.md) · [Changelog](CHANGELOG.md)
 
 Agent Desk is a local project workspace inside the official Codex desktop app on Windows. Keep tasks, deadlines, agent assignments and human review in one place: see what needs attention, return to the conversation behind a task, and decide what is ready to move forward.
 
 It is independently maintained and derived from Dashi Taskboard. It is not an OpenAI product or an official upstream release. [Attribution](NOTICE) · [License](docs/licensing.md)
 
-![Agent Desk dashboard showing reviews, blockers and deadlines in a fictional launch project](docs/assets/showcase-dashboard.png)
+![Four complementary project views with bilingual captions and fictional tasks](docs/assets/workspace-preview.png)
 
-*Actual v1.2.2 web UI with fictional demo data, rendered in a local preview. No real projects, accounts or agent runs are shown; this is not a screenshot of the Codex host.*
+*Actual 1.2.5 project UI with fictional demo data, rendered locally. Bilingual captions explain each view; no real projects, accounts or agent runs are shown.*
 
 ## One project, several ways to work
 
@@ -28,25 +28,25 @@ It is independently maintained and derived from Dashi Taskboard. It is not an Op
 
 ### See usage allowances and reset times
 
-![Legacy Agent Desk allowance preview showing Chinese and English sidebars with fictional data](docs/assets/allowance-preview.png)
+![Current glass allowance component in Chinese and English, light and dark, with four colour states](docs/assets/allowance-preview.png)
 
-The native sidebar shows remaining 5-hour and weekly usage percentages and reset countdowns, helping you pace longer sessions. These are usage limits, not a cash balance.
+See remaining **5-hour and weekly allowances**, plus reset countdowns, without opening a separate dashboard. Bar length shows the remaining percentage. The entire fill uses one continuous state colour: clear blue/cyan when plentiful, a stable healthy green, then orange and red as the allowance falls. Soft vertical highlights give the static bar a restrained glass-and-liquid finish. These are usage limits, not a cash balance.
 
-*Legacy preview: the actual borderless quota component (1.0.6) rendered with fictional data in illustrative Chinese and English sidebars. It contains no real account information and is not a current-version or full Codex client screenshot.*
+*Updated preview: actual quota component 1.0.15, with fictional values in illustrative Chinese/light and English/dark sidebars. The state comparison uses the same component. This is not a full Codex client screenshot. [How allowances work](docs/usage-allowance.md).*
 
 ### Keep the workflow visible
-
-![Task board with fictional tasks assigned to a person and two agents](docs/assets/showcase-board.png)
 
 Tasks move through To do, In progress, Blocked and In review. You can distinguish an agent's assignment from the result that still needs a person to check. A task marked “In progress” does not by itself prove that an agent is currently running.
 
 ### See the schedule, not just the queue
 
-![Gantt timeline with fictional task dates](docs/assets/showcase-gantt.png)
-
 Use dates to see how work overlaps and what is coming next. Prefer a compact overview? The [gallery](docs/showcase.md) also shows the list view.
 
-### Keep review separate from execution
+### Read the material before making a decision
+
+![Approval material review compares a partial preview with a complete grouped diff](docs/assets/approval-preview.png)
+
+The approval center groups the same file version across operations, so shared evidence is read once. It distinguishes complete, preview, missing, unverifiable and conflicting material. Incomplete material disables approval while return and reject remain available. [Review rules](docs/approval-material-review.md).
 
 The approval center presents human-readable handoff details when the local receiver integration is configured. Receiving a request, claiming a task and moving a task to review are different events. A review decision does not automatically start an agent or grant open-ended command access.
 
@@ -61,13 +61,13 @@ Project automation prepares requests for Codex's native Scheduled tasks. Agent D
 
 ## Download and compatibility
 
-**[Agent Desk 1.2.4 · Windows x64 installer](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.4/Agent-Desk-1.2.4-Windows-x64-setup.exe)**
+**[Agent Desk 1.2.5 · Windows x64 installer](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.5/Agent-Desk-1.2.5-Windows-x64-setup.exe)**
 
-[Release notes and SHA-256](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.4) · [Known issues and candidate status](docs/known-issues.md)
+[Release notes and SHA-256](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.5) · [Known issues and candidate status](docs/known-issues.md)
 
-The current public stable release is v1.2.4; the earlier unpublished v1.2.3 tag is retained. The current-user installer is unsigned. Automatic updates are disabled; login autostart is optional. Only Windows x64 is supported.
+The public stable release is **v1.2.5**. The current-user installer is unsigned. Automatic updates are disabled; login autostart is optional. Only Windows x64 is supported.
 
-The 1.2.4 release restores injection on updated Codex / Pro sidebars, adds bounded discovery recovery and includes the workbench, approval and selected glass quota improvements. Six externally supervised phases completed approximately 5.5 hours without recorded functional failure; the user accepted the scope and confirmed workbench/quota before shutdown. See the [release notes](docs/release-1.2.4.md) for observation limits.
+1.2.5 replaces repeated shell-based process checks with a persistent native observer and adds clearer bounded diagnostics, without extending timeouts or retry limits. The candidate completed about 5.5 externally supervised hours without recorded observation failures; the user then reported tens of hours of normal use across four days without recurrence and accepted publication. Controlled failure, recovery and normal exit were not completed in that field round. The additional approval-material UI was checked offline. [Release notes and exact scope](docs/release-1.2.5.md).
 
 Exit Codex and the old tray normally before installing or starting through Agent Desk. Preserve the old installation and data for rollback; do not run two launchers at once. Renderer compatibility is checked structurally on each new document; future Codex versions are not guaranteed compatible. Live approval execution has separate setup and acceptance requirements.
 

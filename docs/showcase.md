@@ -1,51 +1,37 @@
-# Project views and usage allowances / 项目视图与额度展示
+# Agent Desk in pictures / 图解智能体工作台
 
-The four project-view screenshots below render the actual public v1.2.2 web application from source commit `88cd689333cd9b62c34fbb31a7592a237a3ce66c`. The fictional “Product launch” project contains ten tasks, one demo person and two demo agents. No real account, workspace, conversation or agent execution is used. The local web preview is not the full Codex host and does not certify installation, approval execution or runtime compatibility.
+Actual 1.2.5 components, fictional data, bilingual explanations. These local previews are not full Codex host screenshots or proof of live agent execution.
 
-下方四张项目视图例图来自公开 v1.2.2 的实际组件。虚构的“Product launch”项目包含10个任务、1位演示用户和2个演示智能体，不读取真实账户、工作目录或对话，不运行智能体。独立网页预览不是完整 Codex 宿主，也不替代安装/审批执行/兼容验收。
+实际 1.2.5 组件、虚构数据、中英说明。本地预览不是完整 Codex 宿主截图，也不代表真实智能体执行。
 
-## Dashboard / 仪表盘
+## Allowances at a glance / 一眼看清额度
 
-Find reviews, blockers and dates before opening individual tasks. Running status is kept distinct from a task's “In progress” label.
+![Chinese/light and English/dark quota states](assets/allowance-preview.png)
 
-先看待验收、阻碍与日期，再进入具体任务；进行中的任务不自动等于正在运行的智能体。
+Two windows, reset countdowns, one continuous state colour. [Details](usage-allowance.md).
 
-![Dashboard with fictional demo data](assets/showcase-dashboard.png)
+双周期、重置倒计时、连续状态主色。[说明](usage-allowance.md)。
 
-## Board / 看板
+## Choose the view for the decision / 用合适的视图做决定
 
-Follow task stages, assignments, priorities and labels. The visible cards belong to the same project as the dashboard.
+![Four project views with bilingual captions](assets/workspace-preview.png)
 
-看清同一项目的任务阶段、负责人、优先级与标签。
+Dashboard for attention, board for stages, list for detail, timeline for dates. Owners and status record work; they do not prove an agent is currently running.
 
-![Board with fictional demo data](assets/showcase-board.png)
+仪表盘看重点，看板看阶段，列表查细节，甘特图排日期。负责人和状态记录工作，不等于智能体正在运行。
 
-## List / 列表
+Full-size current previews: [Dashboard / 仪表盘](assets/showcase-dashboard.png) · [Board / 看板](assets/showcase-board.png) · [List / 列表](assets/showcase-list.png) · [Timeline / 甘特图](assets/showcase-gantt.png).
 
-Scan work by status in a compact layout, with owners and due dates beside each issue.
+## A clearer review decision / 更清楚地审阅
 
-按状态快速浏览，将负责人和截止日期放在任务旁。
+![Incomplete versus complete approval evidence](assets/approval-preview.png)
 
-![List with fictional demo data](assets/showcase-list.png)
+Shared evidence is grouped; incomplete material cannot be approved. [Review rules](approval-material-review.md).
 
-## Gantt / 甘特图
+共用材料合并展示，材料不完整时不能批准。[规则](approval-material-review.md)。
 
-See start/due dates on a timeline and compare overlapping work.
+## Earlier allowance illustration / 旧版额度栏图
 
-将开始/截止日期放在时间线上，比较任务的时间重叠。
+[The previous bilingual illustration](assets/allowance-legacy.png) is retained for historical comparison. It shows component 1.0.6, not the current design.
 
-![Gantt timeline with fictional demo data](assets/showcase-gantt.png)
-
-## Usage allowances and reset times / 使用额度与重置时间
-
-See remaining 5-hour and weekly usage percentages and reset countdowns in the native sidebar. These are usage limits, not a cash balance.
-
-在原生侧栏查看 5 小时和每周剩余使用比例与重置倒计时。这里的“额度”指使用限额，不是现金余额。
-
-![Legacy Agent Desk allowance preview showing Chinese and English sidebars with fictional data](assets/allowance-preview.png)
-
-*Legacy preview: the actual borderless quota component (1.0.6) rendered with fictional data in illustrative Chinese and English sidebars. It contains no real account information and is not a current-version or full Codex client screenshot.*
-
-*旧版演示图：使用实际的 1.0.6 无边框额度组件和虚构数据，展示中英文侧栏效果。不含真实账户信息；不是最新版截图，也不是完整 Codex 客户端截图。*
-
-[Back to the introduction](../README.md) · [返回中文介绍](../README.zh-CN.md)
+[旧版中英介绍图](assets/allowance-legacy.png)保留作历史对比，展示的是 1.0.6 组件，不是现行设计。

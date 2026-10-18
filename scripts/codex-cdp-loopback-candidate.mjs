@@ -284,6 +284,8 @@ export function createLoopbackCandidateRuntime(port, pid, {
   let unknownCount = 0;
   let observation = "verified";
   let terminalError = null;
+  let terminalReason = null;
+  let lastObservationSampleAt = -Infinity;
   let processExited = false;
   let previousDiscovery = null;
   let discoveryFailures = 0;
@@ -300,6 +302,7 @@ export function createLoopbackCandidateRuntime(port, pid, {
   });
   const failDiscovery = (stage) => {
     healthy = false;
+    terminalReason = "discovery-unavailable";
     terminalError = new Error("Codex target discovery unavailable");
     discoveryEvent("failed", stage);
     return terminalError;
@@ -310,28 +313,41 @@ export function createLoopbackCandidateRuntime(port, pid, {
     if (terminalError) throw terminalError;
     if (processObserver && (!processObserver.isHealthy() || Number.isInteger(processObserver.exitCode()))) {
       healthy = false;
+      terminalReason = processObserver.failureReason?.() || "process-observer-stopped";
       throw new Error("Registered process observer stopped");
     }
     let state;
     try { state = await inspect(port, pid); }
     catch (error) {
+      const details = { reason: error.reason || (error.code === "ETIMEDOUT" ? "helper-timeout" : "process-observation-unavailable"),
+        stage: error.stage, elapsedMs: error.elapsedMs, nativeCode: error.nativeCode, backend: error.backend, observerPid: error.observerPid,
+        observationSequence: error.observationSequence };
       if (!closed && error.code === "ETIMEDOUT" && ++unknownCount < 3) {
-        if (observation !== "timeout") onObservation({ observation: "timeout", observationFailures: unknownCount });
+        onObservation({ observation: "timeout", observationFailures: unknownCount, ...details });
         observation = "timeout";
         throw Object.assign(new Error("Registered process observation timed out; discovery deferred"), { observationPending: true });
       }
       healthy = false;
-      onObservation({ observation: "failed", observationFailures: Math.min(unknownCount, 3) });
+      terminalReason = "process-observation-unavailable";
+      onObservation({ observation: "failed", observationFailures: Math.min(unknownCount, 3), ...details });
       terminalError = new Error("Registered process observation unavailable");
       throw terminalError;
     }
     if (closed) throw new Error("Codex runtime closed");
     if (!state || typeof state.processAlive !== "boolean" || typeof state.listenerOwned !== "boolean") {
+      terminalReason = "process-observation-unavailable";
       healthy = false; terminalError = new Error("Invalid registered process observation"); throw terminalError;
     }
     if (!state.processAlive) { processExited = true; healthy = false; terminalError = new Error("Registered Codex exited"); return state; }
-    if (!state.listenerOwned) { healthy = false; terminalError = new Error("Codex CDP listener ownership changed"); throw terminalError; }
-    if (observation === "timeout") onObservation({ observation: "recovered", observationFailures: unknownCount });
+    if (!state.listenerOwned) { terminalReason = "listener-misowned"; healthy = false; terminalError = new Error("Codex CDP listener ownership changed"); throw terminalError; }
+    const details = { backend: state.backend, stage: state.stage, elapsedMs: state.elapsedMs, observationSequence: state.observationSequence, observerPid: state.observerPid };
+    if (observation === "timeout") {
+      onObservation({ observation: "recovered", observationFailures: unknownCount, ...details });
+      lastObservationSampleAt = now();
+    } else if (state.backend === "native-tcp-table" && now() - lastObservationSampleAt >= 60_000) {
+      onObservation({ observation: "verified", observationFailures: 0, ...details });
+      lastObservationSampleAt = now();
+    }
     observation = "verified";
     unknownCount = 0;
     return state;
@@ -423,6 +439,7 @@ export function createLoopbackCandidateRuntime(port, pid, {
     isHealthy: () => healthy && (processObserver?.isHealthy() ?? true)
       && processObserver?.exitCode() == null,
     exitCode: () => processObserver?.exitCode() ?? null,
+    failureReason: () => terminalReason || processObserver?.failureReason?.() || "connection-lost",
     processExited() {
       return processExited || Number.isInteger(processObserver?.exitCode());
     },

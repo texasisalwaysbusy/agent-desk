@@ -252,6 +252,7 @@ async function copyApplicationResources() {
   for (const fileName of [
     "codex-cdp-pipe.mjs",
     "codex-injector.mjs",
+    "codex-process-observer.mjs",
     "codex-injector-runtime.mjs",
     "codex-quota-observer.mjs",
     "codex-rate-limits.mjs",

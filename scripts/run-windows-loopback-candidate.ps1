@@ -28,6 +28,12 @@ if ($PreflightOnly) {
 if (Get-Process -Name ChatGPT -ErrorAction SilentlyContinue) {
   throw 'Exit Codex normally before starting the source-test candidate.'
 }
+$nativeObserver = Join-Path $projectRoot 'src-tauri/target/x86_64-pc-windows-msvc/debug/agent-desk-launcher.exe'
+if (-not (Test-Path -LiteralPath $nativeObserver -PathType Leaf) -or
+    -not [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($nativeObserver)).Contains('--agent-desk-observe')) {
+  throw 'Build the updated Windows debug launcher before this explicit source experiment.'
+}
+$env:CODEX_TASKBOARD_OBSERVER_EXECUTABLE = $nativeObserver
 
 $reservation = [Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback, 0)
 $reservation.Start()

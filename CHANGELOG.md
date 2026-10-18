@@ -1,5 +1,17 @@
 # Changelog / 更新日志
 
+## [1.2.5](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.5) · 2026-10-18
+
+- Replace repeated shell ownership probes with a bundled native process/listener observer; retain strict identity checks and existing stop limits.
+- Distinguish runtime observation failure from actual process exit, and make shared approval material clearer to review.
+- Restore and refresh bilingual quota, workflow and review illustrations using actual components and fictional data.
+- Six supervised phases passed; the user also reports tens of hours over four days without recurrence. Controlled-fault/recovery/normal-exit gaps remain explicit. [Full release scope](docs/release-1.2.5.md).
+
+- 使用包内原生只读观测替代循环Shell检查，保留严格身份验证和既有停止上限。
+- 区分运行期观测失效与真实退出，改进共用审批差异展示与材料完整性提示。
+- 恢复并更新中英文额度栏、任务视图与审批图解，使用实际组件和虚构数据。
+- 六段监督通过，用户另确认四天累计数十小时无复发；受控故障、恢复和真实退出缺口保留。[完整说明](docs/release-1.2.5.md)。
+
 ## [1.2.4](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.4) · 2026-10-06
 
 - Restore injection on updated Codex / Pro sidebars with additional native header rows, including Your dot.

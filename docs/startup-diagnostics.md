@@ -44,6 +44,10 @@ workbench 0.6.20 增加 mountState（parked/mounted/unavailable）、pageHidden�
 
 固定 frame-bootstrap 事件只记录 ready/timeout/invalidated/contract-refused/frame-refused/failed，每个 renderer 最多24条；ready 表示受控文档模块启动、策略恢复及宿主确认已完成，仍不能代替完整现场交互。加载先重新通过当前顶层契约及自有空白直接子 frame 检查；在最多8秒的临时 CSP 窗口内仅重建自有 iframe 并写入 HMAC 验证的本地文档，成功、失败或顶层导航都恢复宿主 CSP。隔离文档使用仅允许本地应用资源的策略与一次性 bootstrap nonce，窗口结束后重新施加该策略。若精确的自有 frame ID 对应 OOPIF，临时协议会话仅发送 Page.setBypassCSP(false)，随后分离；不在子 target 启用 bypass、注入宿主脚本、读取账户/原生页面或开放任意 RPC。恢复失败不确认加载成功。
 
-process-observation 只记录 timeout/recovered/failed 与0–3的 observationFailures。注册 PID/监听检查改为异步、隐藏窗口、5秒超时及4KiB输出上限；单次超时仅是观察未知，保留已验证通道的独立心跳，不允许任何新的发现/连接绕过重新验证。三次连续超时、错误响应、观察器停止、进程退出或监听归属改变仍停止；恢复只观察同一已注册 PID/端口，不重启、不重新激活、不切换传输。恢复/未知都不伪造退出码，不输出 PowerShell 原文或命令。
+1.2.5 的 process-observation 记录 ready、首次及每60秒 verified、timeout/recovered/failed 与0–3的 observationFailures。单个包内原生子进程持有只读进程句柄，每请求重新查询IPv4/IPv6监听表；不再反复启动PowerShell/CIM。助手在Tauri和用户目录初始化前处理固定私有参数，无新服务、配置或传输。生产入口必须来自更新后的启动器，缺少助手路径在Store激活前拒绝，不回退旧观测方式。
+
+请求仍5秒、4KiB缓冲上限；单次超时仅是观察未知，保留已验证通道的独立心跳，不允许新的发现/连接绕过重新验证。三次连续超时、错误响应、观察器停止、进程退出或监听归属改变仍停止；恢复只观察同一已注册 PID/端口，不缓存归属、不重启助手、不重新激活或切换传输。序号隔离迟到结果，当前同一在途请求合并，避免形成探测队列。
+
+新增固定 backend/stage/reason、耗时、nativeCode、observationSequence、observerPid、helperExitCode；不记录原始系统输出、命令、地址或环境。helperExitCode只是助手退出值，不能写成Codex退出0。Codex真实退出仍须原进程句柄给出，含259等非零值。已成功注入后的故障记录 runtime-failed，初始失败仍 startup-failed；托盘据此区分运行中失效和未能启动。写入与CLI读取均执行相同字段白名单。实际候选观察与用户使用反馈见 [1.2.5 发行说明](release-1.2.5.md)；离线结果与有界现场观察不能推断无限期稳定。
 
 工作台写入预算48（第49条 trace-limit）与额度条写入预算96属于不同记录流。trace-limit 不等于运行状态失去监控；独立 health 继续更新。但缺少事件顺序时不可判定原因，也不以扩大日志预算来伪造覆盖。

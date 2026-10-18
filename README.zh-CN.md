@@ -2,15 +2,15 @@
 
 **把分散的智能体对话，组织成可追踪、可审阅、可完成的项目。**
 
-[下载 Windows 版](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.4) · [English](README.md) · [功能例图](docs/showcase.md) · [更新日志](CHANGELOG.md)
+[下载 Windows 版](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.5) · [English](README.md) · [功能例图](docs/showcase.md) · [更新日志](CHANGELOG.md)
 
 Agent Desk 是嵌入 Windows 官方 Codex 桌面应用的本地项目工作台。任务、截止日期、智能体分工和人工审阅集中在同一个地方：知道下一步该处理什么，找到任务背后的对话，再判断结果是否可以继续推进。
 
 如果你同时推进多个项目，或者把工作分给不同智能体，它能让“聊过什么”逐渐变成“谁在做、做到哪、还缺什么、谁来验收”。
 
-![虚构产品发布项目的真实仪表盘，展示待验收、阻碍和截止日期](docs/assets/showcase-dashboard.png)
+![四种项目视图：实际界面、虚构数据、中英双语说明](docs/assets/workspace-preview.png)
 
-*例图来自公开 v1.2.2 的实际网页组件，使用虚构项目和演示数据在本地渲染。不含真实账户、私人项目或运行中的智能体，也不是完整 Codex 客户端截图。*
+*实际 1.2.5 项目界面，使用本地虚构演示数据；未展示真实项目、账户或智能体运行，不是 Codex 宿主截图。*
 
 ## 从任务到结果，把工作衔接起来
 
@@ -26,25 +26,25 @@ Agent Desk 是嵌入 Windows 官方 Codex 桌面应用的本地项目工作台�
 
 ### 看清剩余额度与重置时间
 
-![Agent Desk 旧版中英文侧栏额度演示图，使用虚构数据](docs/assets/allowance-preview.png)
+![新版额度栏：中英双语、明暗背景与四种额度状态对比](docs/assets/allowance-preview.png)
 
-原生侧栏显示 5 小时和每周剩余使用比例与重置倒计时，帮助安排后续任务。这里的“额度”指使用限额，不是现金余额。
+在原生侧栏直接查看 **5 小时与每周剩余额度**、重置倒计时，无需另开页面。长度表示剩余比例，整段填充使用同一状态主色：充沛时清澈的蓝青色，健康时稳定的绿色，减少后逐渐转向橙色、红色。柔和的垂直高光让静态条形带有克制的玻璃与液体质感。这里显示使用限额，不是现金余额。
 
-*旧版演示图：使用实际的 1.0.6 无边框额度组件和虚构数据，展示中英文侧栏效果。不含真实账户信息；不是最新版截图，也不是完整 Codex 客户端截图。*
+*新版示意使用实际额度组件 1.0.15 与虚构数值，含中文浅色、英文深色侧栏及状态对比；不是完整 Codex 客户端截图。[额度栏说明](docs/usage-allowance.md)。*
 
 ### 看清任务正在走到哪一步
-
-![虚构项目看板，展示人和智能体的任务分工](docs/assets/showcase-board.png)
 
 从等待认领、处理中，到遇到阻碍、等你确认，每个阶段都有明确的含义。智能体提交结果以后，你仍然可以保留审阅环节；任务处于“处理中”并不自动证明智能体正在运行。
 
 ### 把截止日期放进整体安排
 
-![虚构任务的甘特时间线](docs/assets/showcase-gantt.png)
-
 用日期看清哪些工作重叠、哪些即将到期。偏好紧凑视图时，可以切到列表；[例图库](docs/showcase.md)展示了同一项目的不同视图。
 
 ### 让交接、审批和执行各自有据可查
+
+![审批材料对比：预览不完整与完整差异分组](docs/assets/approval-preview.png)
+
+相同路径、相同声明摘要的材料按版本合并，多个操作共用的差异只需读一次。审批中心区分完整、预览、缺失、无法核验与冲突；材料不完整时不能批准，仍可退回补充或拒绝。[材料审阅规则](docs/approval-material-review.md)。
 
 审批中心在配置了本地接收端集成后，提供具体交接内容的人工审阅入口。收到申请、认领任务、提交验收和允许执行是不同的步骤。审批决定不会自动启动智能体，也不会授予无限制的命令权限。
 
@@ -59,13 +59,13 @@ Agent Desk 是嵌入 Windows 官方 Codex 桌面应用的本地项目工作台�
 
 ## 下载、版本与兼容
 
-**[下载 Agent Desk 1.2.4 · Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.4/Agent-Desk-1.2.4-Windows-x64-setup.exe)**
+**[下载 Agent Desk 1.2.5 · Windows x64 安装包](https://github.com/texasisalwaysbusy/agent-desk/releases/download/v1.2.5/Agent-Desk-1.2.5-Windows-x64-setup.exe)**
 
-[发行说明与 SHA-256 校验文件](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.4) · [已知问题与候选状态](docs/known-issues.md)
+[发行说明与 SHA-256 校验文件](https://github.com/texasisalwaysbusy/agent-desk/releases/tag/v1.2.5) · [已知问题与候选状态](docs/known-issues.md)
 
-目前公开稳定版是 v1.2.4，保留较早未发行的 v1.2.3 标签。按当前用户安装，安装包未签名。支持 Windows x64，不提供自动更新；登录自启动由你选择启用。
+当前公开正式版为 **v1.2.5**。当前用户安装包未签名，自动更新关闭，登录自启动可选，仅支持 Windows x64。
 
-1.2.4 正式版兼容新版 Codex / Pro 侧栏，支持短暂目标发现错误的有界恢复，并汇入工作台、审批和选定的玻璃额度修复。六段外部监督完成约 5.5 小时，无功能失败记录；用户确认关机前工作台可打开、额度正常，并接受该范围。[发行说明](docs/release-1.2.4.md)保留诊断部分覆盖、收尾与正常退出未执行等观察边界。
+1.2.5 将循环启动的脚本进程检查改为持久原生观测，补充有界诊断，保留原超时与重试限制。候选包约 5.5 小时外部监督未记录观测失败；用户随后反馈跨四天、数十小时日常使用无复发，接受发行。本轮受控故障、恢复与正常退出未完成；新增审批材料界面已做离线验证。[更新内容与准确验收范围](docs/release-1.2.5.md)。
 
 安装或启动前正常退出 Codex 和旧托盘，保留旧版安装及数据作为回退点，不同时运行两套启动器。每个新文档都要通过结构兼容检查，不能保证所有未来 Codex 版本都兼容。人工审批执行需要另行配置集成并验收。
 

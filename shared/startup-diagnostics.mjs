@@ -10,7 +10,7 @@ const allowedEvents = new Set([
   "spawn-started", "spawn-returned", "codex-exited", "cdp-output-ended",
   "cdp-handshake", "cdp-ready", "renderer-discovery", "renderer-waiting",
   "renderer-probe-start", "renderer-contract", "renderer-timeout",
-  "injection-result", "startup-failed",
+  "injection-result", "startup-failed", "runtime-failed",
   "managed-process-after-injector-exit",
   "activation-started", "activation-ready", "activation-refused", "activation-failed",
   "launcher-start-refused", "codex-exit-unobserved", "codex-observation-stopping",
@@ -21,7 +21,7 @@ const allowedEvents = new Set([
   "frame-bootstrap",
   "renderer-discovery-health",
 ]);
-const allowedStages = new Set(["browser-version", "target-discovery", "target-fetch", "target-body"]);
+const allowedStages = new Set(["browser-version", "target-discovery", "target-fetch", "target-body", "helper-start", "process-handle", "helper-protocol", "listener-table", "listener-ipv4", "listener-ipv6"]);
 
 export function sanitizeStartupDiagnostic(line) {
   let source;
@@ -75,12 +75,18 @@ export function sanitizeStartupDiagnostic(line) {
   }
   if (allowedStages.has(source.stage)) result.stage = source.stage;
   if (["ready", "timeout", "invalidated", "contract-refused", "frame-refused", "failed", "busy"].includes(source.bootstrap)) result.bootstrap = source.bootstrap;
-  if (["timeout", "recovered", "failed"].includes(source.observation)) result.observation = source.observation;
+  if (["ready", "verified", "timeout", "recovered", "failed"].includes(source.observation)) result.observation = source.observation;
+  if (source.backend === "native-tcp-table") result.backend = source.backend;
+  if (Number.isSafeInteger(source.observerPid) && source.observerPid > 0 && source.observerPid <= 0xffffffff) result.observerPid = source.observerPid;
+  if (Number.isInteger(source.helperExitCode) && source.helperExitCode >= -2147483648 && source.helperExitCode <= 0xffffffff) result.helperExitCode = source.helperExitCode;
+  if (Number.isInteger(source.observationSequence) && source.observationSequence > 0 && source.observationSequence <= 1_000_000_000) result.observationSequence = source.observationSequence;
+  if (Number.isInteger(source.nativeCode) && source.nativeCode >= 0 && source.nativeCode <= 0xffffffff) result.nativeCode = source.nativeCode;
   if (Number.isInteger(source.observationFailures) && source.observationFailures >= 0 && source.observationFailures <= 3) result.observationFailures = source.observationFailures;
   if (Number.isInteger(source.discoveryFailures) && source.discoveryFailures >= 0 && source.discoveryFailures <= 6) result.discoveryFailures = source.discoveryFailures;
   if (Number.isInteger(source.elapsedMs) && source.elapsedMs >= 0 && source.elapsedMs <= 30_000) result.elapsedMs = source.elapsedMs;
   if ([
     "before-injection", "connection-lost", "renderer-contract-mismatch",
+        "process-observation-unavailable", "process-observer-stopped", "listener-misowned", "discovery-unavailable", "helper-timeout", "helper-start-failed", "helper-exit", "helper-protocol", "output-limit", "tcp-table-error", "process-unavailable", "invalid-request",
     "invalid-probe-result", "probe-evaluation-failed", "probe-transport-failed",
     "codex-running", "activation-failed", "instance-already-running", "process-check-failed",
     "launcher-stopped",
