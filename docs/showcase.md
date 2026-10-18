@@ -1,8 +1,8 @@
-# A project, four views / 一个项目，四种视图
+# Project views and usage allowances / 项目视图与额度展示
 
-These screenshots render the actual public v1.2.2 web application from source commit `88cd689333cd9b62c34fbb31a7592a237a3ce66c`. The fictional “Product launch” project contains ten tasks, one demo person and two demo agents. No real account, workspace, conversation or agent execution is used. The local web preview is not the full Codex host and does not certify installation, approval execution or runtime compatibility.
+The four project-view screenshots below render the actual public v1.2.2 web application from source commit `88cd689333cd9b62c34fbb31a7592a237a3ce66c`. The fictional “Product launch” project contains ten tasks, one demo person and two demo agents. No real account, workspace, conversation or agent execution is used. The local web preview is not the full Codex host and does not certify installation, approval execution or runtime compatibility.
 
-例图来自公开 v1.2.2 的实际组件。虚构的“Product launch”项目包含10个任务、1位演示用户和2个演示智能体，不读取真实账户、工作目录或对话，不运行智能体。独立网页预览不是完整 Codex 宿主，也不替代安装/审批执行/兼容验收。
+下方四张项目视图例图来自公开 v1.2.2 的实际组件。虚构的“Product launch”项目包含10个任务、1位演示用户和2个演示智能体，不读取真实账户、工作目录或对话，不运行智能体。独立网页预览不是完整 Codex 宿主，也不替代安装/审批执行/兼容验收。
 
 ## Dashboard / 仪表盘
 
@@ -35,5 +35,17 @@ See start/due dates on a timeline and compare overlapping work.
 将开始/截止日期放在时间线上，比较任务的时间重叠。
 
 ![Gantt timeline with fictional demo data](assets/showcase-gantt.png)
+
+## Usage allowances and reset times / 使用额度与重置时间
+
+See remaining 5-hour and weekly usage percentages and reset countdowns in the native sidebar. These are usage limits, not a cash balance.
+
+在原生侧栏查看 5 小时和每周剩余使用比例与重置倒计时。这里的“额度”指使用限额，不是现金余额。
+
+![Legacy Agent Desk allowance preview showing Chinese and English sidebars with fictional data](assets/allowance-preview.png)
+
+*Legacy preview: the actual borderless quota component (1.0.6) rendered with fictional data in illustrative Chinese and English sidebars. It contains no real account information and is not a current-version or full Codex client screenshot.*
+
+*旧版演示图：使用实际的 1.0.6 无边框额度组件和虚构数据，展示中英文侧栏效果。不含真实账户信息；不是最新版截图，也不是完整 Codex 客户端截图。*
 
 [Back to the introduction](../README.md) · [返回中文介绍](../README.zh-CN.md)
